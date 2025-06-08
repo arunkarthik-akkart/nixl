@@ -33,15 +33,13 @@ class xferBenchNixlWorker: public xferBenchWorker {
     private:
         nixlAgent* agent;
         nixlBackendH* backend_engine;
-        nixl_mem_t seg_type;
-        std::vector<int> remote_fds;
         std::vector<std::vector<xferBenchIOV>> remote_iovs;
     public:
-        xferBenchNixlWorker(int *argc, char ***argv, std::vector<std::string> devices);
+        xferBenchNixlWorker(int *argc, char ***argv);
         ~xferBenchNixlWorker();  // Custom destructor to clean up resources
 
         // Memory management
-        std::vector<std::vector<xferBenchIOV>> allocateMemory(int num_threads) override;
+        std::vector<std::vector<xferBenchIOV>> allocateMemory(void) override;
         void deallocateMemory(std::vector<std::vector<xferBenchIOV>> &iov_lists) override;
 
         // Communication and synchronization

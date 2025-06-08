@@ -44,9 +44,7 @@
         }                                                                         \
     } while(0)
 
-xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv, std::vector<std::string> devices) : xferBenchWorker(argc, argv) {
-    seg_type = DRAM_SEG;
-
+xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv) : xferBenchWorker(argc, argv) {
     int rank;
     std::string backend_name;
     nixl_b_params_t backend_params;
@@ -78,7 +76,7 @@ xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv, std::vector<st
            exit(EXIT_FAILURE);
         }
 
-        std::cout << "Init nixl worker, dev " << (("all" == devices[0]) ? "all" : backend_params["device_list"])
+        std::cout << "Init nixl worker"
                   << " rank " << rank << ", type " << name << ", hostname "
                   << hostname << std::endl;
     } else {
@@ -152,39 +150,30 @@ void xferBenchNixlWorker::cleanupBasicDescDram(xferBenchIOV &iov) {
     free((void *)iov.addr);
 }
 
-std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory(int num_lists) {
+std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory() {
     std::vector<std::vector<xferBenchIOV>> iov_lists;
     size_t buffer_size;
     nixl_opt_args_t opt_args;
 
-    buffer_size = xferBenchConfig::total_buffer_size / (num_lists);
+    buffer_size = xferBenchConfig::total_buffer_size;
 
     opt_args.backends.push_back(backend_engine);
 
-    for (int list_idx = 0; list_idx < num_lists; list_idx++) {
-        std::vector<xferBenchIOV> iov_list;
+    std::vector<xferBenchIOV> iov_list;
 
-        std::optional<xferBenchIOV> basic_desc;
+    std::optional<xferBenchIOV> basic_desc;
 
-        switch (seg_type) {
-        case DRAM_SEG:
-            basic_desc = initBasicDescDram(buffer_size, 0);
-            break;
-        default:
-            std::cerr << "Unsupported mem type: " << seg_type << std::endl;
-            exit(EXIT_FAILURE);
-        }
+    basic_desc = initBasicDescDram(buffer_size, 0);
 
-        if (basic_desc) {
-            iov_list.push_back(basic_desc.value());
-        }
-
-        nixl_reg_dlist_t desc_list(seg_type);
-        iovListToNixlRegDlist(iov_list, desc_list);
-        CHECK_NIXL_ERROR(agent->registerMem(desc_list, &opt_args),
-                       "registerMem failed");
-        iov_lists.push_back(iov_list);
+    if (basic_desc) {
+        iov_list.push_back(basic_desc.value());
     }
+
+    nixl_reg_dlist_t desc_list(DRAM_SEG);
+    iovListToNixlRegDlist(iov_list, desc_list);
+    CHECK_NIXL_ERROR(agent->registerMem(desc_list, &opt_args),
+                    "registerMem failed");
+    iov_lists.push_back(iov_list);
 
     return iov_lists;
 }
@@ -195,22 +184,14 @@ void xferBenchNixlWorker::deallocateMemory(std::vector<std::vector<xferBenchIOV>
     opt_args.backends.push_back(backend_engine);
     for (auto &iov_list: iov_lists) {
         for (auto &iov: iov_list) {
-            switch (seg_type) {
-            case DRAM_SEG:
-                cleanupBasicDescDram(iov);
-                break;
-            default:
-                std::cerr << "Unsupported mem type: " << seg_type << std::endl;
-                exit(EXIT_FAILURE);
-            }
+            cleanupBasicDescDram(iov);
         }
 
-        nixl_reg_dlist_t desc_list(seg_type);
+        nixl_reg_dlist_t desc_list(DRAM_SEG);
         iovListToNixlRegDlist(iov_list, desc_list);
         CHECK_NIXL_ERROR(agent->deregisterMem(desc_list, &opt_args),
                          "deregisterMem failed");
     }
-
 }
 
 int xferBenchNixlWorker::exchangeMetadata() {
@@ -258,7 +239,7 @@ xferBenchNixlWorker::exchangeIOV(const std::vector<std::vector<xferBenchIOV>> &l
 
     for (const auto &local_iov: local_iovs) {
         nixlSerDes ser_des;
-        nixl_xfer_dlist_t local_desc(seg_type);
+        nixl_xfer_dlist_t local_desc(DRAM_SEG);
 
         iovListToNixlXferDlist(local_iov, local_desc);
 
@@ -301,59 +282,54 @@ xferBenchNixlWorker::exchangeIOV(const std::vector<std::vector<xferBenchIOV>> &l
 static int execTransfer(nixlAgent *agent,
                         const std::vector<std::vector<xferBenchIOV>> &local_iovs,
                         const std::vector<std::vector<xferBenchIOV>> &remote_iovs,
-                        const nixl_xfer_op_t op,
-                        const int num_threads)
+                        const nixl_xfer_op_t op)
 {
     int ret = 0;
 
-    #pragma omp parallel num_threads(num_threads)
-    {
-        const int tid = omp_get_thread_num();
-        const auto &local_iov = local_iovs[tid];
-        const auto &remote_iov = remote_iovs[tid];
+    const auto &local_iov = local_iovs[0];
+    const auto &remote_iov = remote_iovs[0];
 
-        // TODO: fetch local_desc and remote_desc directly from config
-        nixl_xfer_dlist_t local_desc(DRAM_SEG);
-        nixl_xfer_dlist_t remote_desc(DRAM_SEG);
+    // TODO: fetch local_desc and remote_desc directly from config
+    nixl_xfer_dlist_t local_desc(DRAM_SEG);
+    nixl_xfer_dlist_t remote_desc(DRAM_SEG);
 
-        iovListToNixlXferDlist(local_iov, local_desc);
-        iovListToNixlXferDlist(remote_iov, remote_desc);
+    iovListToNixlXferDlist(local_iov, local_desc);
+    iovListToNixlXferDlist(remote_iov, remote_desc);
 
-        nixl_opt_args_t params;
-        nixl_b_params_t b_params;
-        bool error = false;
-        nixlXferReqH *req;
-        nixl_status_t rc;
-        std::string target;
+    nixl_opt_args_t params;
+    nixl_b_params_t b_params;
+    bool error = false;
+    nixlXferReqH *req;
+    nixl_status_t rc;
+    std::string target;
 
-        params.notifMsg = "0xBEEF";
-        params.hasNotif = true;
-        target = "target";
+    params.notifMsg = "0xBEEF";
+    params.hasNotif = true;
+    target = "target";
 
-        CHECK_NIXL_ERROR(agent->createXferReq(op, local_desc, remote_desc, target,
-                                            req, &params), "createTransferReq failed");
+    CHECK_NIXL_ERROR(agent->createXferReq(op, local_desc, remote_desc, target,
+                                        req, &params), "createTransferReq failed");
 
-        rc = agent->postXferReq(req);
-        if (NIXL_ERR_BACKEND == rc) {
-            std::cout << "NIXL postRequest failed" << std::endl;
-            error = true;
-        } else {
-            do {
-                /* XXX agent isn't const because the getXferStatus() is not const  */
-                rc = agent->getXferStatus(req);
-                if (NIXL_ERR_BACKEND == rc) {
-                    std::cout << "NIXL getStatus failed" << std::endl;
-                    error = true;
-                    break;
-                }
-            } while (NIXL_SUCCESS != rc);
-        }
+    rc = agent->postXferReq(req);
+    if (NIXL_ERR_BACKEND == rc) {
+        std::cout << "NIXL postRequest failed" << std::endl;
+        error = true;
+    } else {
+        do {
+            /* XXX agent isn't const because the getXferStatus() is not const  */
+            rc = agent->getXferStatus(req);
+            if (NIXL_ERR_BACKEND == rc) {
+                std::cout << "NIXL getStatus failed" << std::endl;
+                error = true;
+                break;
+            }
+        } while (NIXL_SUCCESS != rc);
+    }
 
-        agent->releaseXferReq(req);
-        if (error) {
-            std::cout << "NIXL releaseXferReq failed" << std::endl;
-            ret = -1;
-        }
+    agent->releaseXferReq(req);
+    if (error) {
+        std::cout << "NIXL releaseXferReq failed" << std::endl;
+        ret = -1;
     }
 
     return ret;
@@ -368,7 +344,7 @@ std::variant<double, int> xferBenchNixlWorker::transfer(size_t block_size,
     nixl_xfer_op_t xfer_op = XFERBENCH_OP_READ == xferBenchConfig::op_type ? NIXL_READ : NIXL_WRITE;
     // int completion_flag = 1;
 
-    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op, xferBenchConfig::num_threads);
+    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op);
     if (ret < 0) {
         return std::variant<double, int>(ret);
     }
@@ -378,7 +354,7 @@ std::variant<double, int> xferBenchNixlWorker::transfer(size_t block_size,
 
     gettimeofday(&t_start, nullptr);
 
-    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op, xferBenchConfig::num_threads);
+    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op);
 
     gettimeofday(&t_end, nullptr);
     total_duration += (((t_end.tv_sec - t_start.tv_sec) * 1e6) +

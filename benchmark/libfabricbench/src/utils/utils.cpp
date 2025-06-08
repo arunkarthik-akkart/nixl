@@ -34,40 +34,27 @@
 /**********
  * xferBench Config
  **********/
-DEFINE_string(backend, XFERBENCH_BACKEND_UCX, "Name of communication backend [UCX, UCX_MO, GDS, POSIX] \
+DEFINE_string(backend, XFERBENCH_BACKEND_UCX, "Name of communication backend [UCX] \
               (only used with nixl worker)");
 DEFINE_string(op_type, XFERBENCH_OP_WRITE, "Op type: READ, WRITE");
 DEFINE_uint64(total_buffer_size, 8LL * 1024 * (1 << 20), "Total buffer \
               size across device for each process (Default: 80 GiB)");
-DEFINE_int32(num_threads, 1,
-             "Number of threads used by benchmark."
-             " Num_iter must be greater or equal than num_threads and equally divisible by num_threads."
-             " (Default: 1)");
 DEFINE_bool(enable_pt, false, "Enable Progress Thread (only used with nixl worker)");
 
-// TODO: We should take rank wise device list as input to extend support
-// <rank>:<device_list>, ...
-// For example- 0:mlx5_0,mlx5_1,mlx5_2,1:mlx5_3,mlx5_4, ...
-DEFINE_string(device_list, "all", "Comma-separated device name to use for \
-		      communication (only used with nixl worker)");
 DEFINE_string(etcd_endpoints, "http://localhost:2379", "ETCD server endpoints for communication");
 
 std::string xferBenchConfig::backend = "";
 std::string xferBenchConfig::op_type = "";
 size_t xferBenchConfig::total_buffer_size = 0;
-int xferBenchConfig::num_threads = 0;
 bool xferBenchConfig::enable_pt = false;
-std::string xferBenchConfig::device_list = "";
 std::string xferBenchConfig::etcd_endpoints = "";
 std::vector<std::string> devices = { };
 
 int xferBenchConfig::loadFromFlags() {
     backend = FLAGS_backend;
     enable_pt = FLAGS_enable_pt;
-    device_list = FLAGS_device_list;
     op_type = FLAGS_op_type;
     total_buffer_size = FLAGS_total_buffer_size;
-    num_threads = FLAGS_num_threads;
     etcd_endpoints = FLAGS_etcd_endpoints;
 
     return 0;
@@ -77,13 +64,10 @@ void xferBenchConfig::printConfig() {
     std::cout << std::string(70, '*') << std::endl;
     std::cout << "NIXLBench Configuration" << std::endl;
     std::cout << std::string(70, '*') << std::endl;
-
     std::cout << std::left << std::setw(60) << "Backend (--backend=[UCX])" << ": "
                 << backend << std::endl;
     std::cout << std::left << std::setw(60) << "Enable pt (--enable_pt=[0,1])" << ": "
                 << enable_pt << std::endl;
-    std::cout << std::left << std::setw(60) << "Device list (--device_list=dev1,dev2,...)" << ": "
-                << device_list << std::endl;
     std::cout << std::left << std::setw(60) << "Op type (--op_type=[READ,WRITE])" << ": "
               << op_type << std::endl;
     std::cout << std::left << std::setw(60) << "Total buffer size (--total_buffer_size=N)" << ": "
@@ -92,31 +76,13 @@ void xferBenchConfig::printConfig() {
     std::cout << std::endl;
 }
 
-std::vector<std::string> xferBenchConfig::parseDeviceList() {
-    std::vector<std::string> devices;
-    std::string dev;
-    std::stringstream ss(xferBenchConfig::device_list);
-    devices.push_back("all");
-
-    return devices;
-}
-
 /**********
  * xferBench Utils
  **********/
 xferBenchRT *xferBenchUtils::rt = nullptr;
-std::string xferBenchUtils::dev_to_use = "";
 
 void xferBenchUtils::setRT(xferBenchRT *rt) {
     xferBenchUtils::rt = rt;
-}
-
-void xferBenchUtils::setDevToUse(std::string dev) {
-    dev_to_use = dev;
-}
-
-std::string xferBenchUtils::getDevToUse() {
-    return dev_to_use;
 }
 
 void xferBenchUtils::printStatsHeader() {

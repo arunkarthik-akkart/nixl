@@ -44,7 +44,7 @@ class xferBenchWorker {
         static void signalHandler(int signal);
 
         // Memory management
-        virtual std::vector<std::vector<xferBenchIOV>> allocateMemory(int num_threads) = 0;
+        virtual std::vector<std::vector<xferBenchIOV>> allocateMemory(void) = 0;
         virtual void deallocateMemory(std::vector<std::vector<xferBenchIOV>> &iov_lists) = 0;
 
         // Communication and synchronization

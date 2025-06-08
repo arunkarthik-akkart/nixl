@@ -31,11 +31,10 @@
 static std::vector<std::vector<xferBenchIOV>> createTransferDescLists(xferBenchWorker &worker,
                                                                       std::vector<std::vector<xferBenchIOV>> &iov_lists,
                                                                       size_t block_size,
-                                                                      size_t batch_size,
-                                                                      int num_threads) {
+                                                                      size_t batch_size) {
 
     size_t count = 1;
-    size_t stride = xferBenchConfig::total_buffer_size / (num_threads);
+    size_t stride = xferBenchConfig::total_buffer_size;
 
     std::vector<std::vector<xferBenchIOV>> xfer_lists;
 
@@ -63,14 +62,13 @@ static std::vector<std::vector<xferBenchIOV>> createTransferDescLists(xferBenchW
 
 static int processBatchSizes(xferBenchWorker &worker,
                              std::vector<std::vector<xferBenchIOV>> &iov_lists,
-                             size_t block_size, int num_threads) {
+                             size_t block_size) {
     size_t batch_size = 1;
 
     auto local_trans_lists = createTransferDescLists(worker,
                                                         iov_lists,
                                                         block_size,
-                                                        batch_size,
-                                                        num_threads);
+                                                        batch_size);
 
     if (worker.isTarget()) {
         worker.exchangeIOV(local_trans_lists);
@@ -94,12 +92,7 @@ static int processBatchSizes(xferBenchWorker &worker,
 }
 
 static std::unique_ptr<xferBenchWorker> createWorker(int *argc, char ***argv) {
-    std::vector<std::string> devices = xferBenchConfig::parseDeviceList();
-    if (devices.empty()) {
-        std::cerr << "Failed to parse device list" << std::endl;
-        return nullptr;
-    }
-    return std::make_unique<xferBenchNixlWorker>(argc, argv, devices);
+    return std::make_unique<xferBenchNixlWorker>(argc, argv);
 }
 
 int main(int argc, char *argv[]) {
@@ -111,8 +104,6 @@ int main(int argc, char *argv[]) {
     if (0 != ret) {
         return EXIT_FAILURE;
     }
-
-    int num_threads = xferBenchConfig::num_threads;
 
     // Create the appropriate worker based on worker configuration
     std::unique_ptr<xferBenchWorker> worker_ptr = createWorker(&argc, &argv);
@@ -129,7 +120,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    std::vector<std::vector<xferBenchIOV>> iov_lists = worker_ptr->allocateMemory(num_threads);
+    std::vector<std::vector<xferBenchIOV>> iov_lists = worker_ptr->allocateMemory();
     auto mem_guard = make_scope_guard ([&] {
         worker_ptr->deallocateMemory(iov_lists);
     });
@@ -146,7 +137,7 @@ int main(int argc, char *argv[]) {
 
     size_t block_size = 16*1024;
 
-    ret = processBatchSizes(*worker_ptr, iov_lists, block_size, num_threads);
+    ret = processBatchSizes(*worker_ptr, iov_lists, block_size);
     if (0 != ret) {
         return EXIT_FAILURE;
     }

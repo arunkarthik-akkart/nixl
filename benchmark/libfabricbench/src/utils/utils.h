@@ -51,13 +51,10 @@ class xferBenchConfig {
         static std::string backend;
         static std::string op_type;
         static size_t total_buffer_size;
-        static int num_threads;
         static bool enable_pt;
-        static std::string device_list;
         static std::string etcd_endpoints;
         static int loadFromFlags();
         static void printConfig();
-        static std::vector<std::string> parseDeviceList();
 };
 
 // Generic IOV descriptor class independent of NIXL
@@ -73,11 +70,8 @@ public:
 class xferBenchUtils {
     private:
         static xferBenchRT *rt;
-        static std::string dev_to_use;
     public:
         static void setRT(xferBenchRT *rt);
-        static void setDevToUse(std::string dev);
-        static std::string getDevToUse();
 
         static void printStatsHeader();
         static void printStats(bool is_target, size_t block_size, size_t batch_size,
