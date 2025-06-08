@@ -36,18 +36,11 @@
  **********/
 DEFINE_string(backend, XFERBENCH_BACKEND_UCX, "Name of communication backend [UCX, UCX_MO, GDS, POSIX] \
               (only used with nixl worker)");
-DEFINE_string(initiator_seg_type, XFERBENCH_SEG_TYPE_DRAM, "Type of memory segment for initiator \
-              [DRAM, VRAM]");
-DEFINE_string(target_seg_type, XFERBENCH_SEG_TYPE_DRAM, "Type of memory segment for target \
-              [DRAM, VRAM]");
 DEFINE_string(scheme, XFERBENCH_SCHEME_PAIRWISE, "Scheme: pairwise, maytoone, onetomany, tp");
 DEFINE_string(mode, XFERBENCH_MODE_SG, "MODE: SG (Single GPU per proc), MG (Multi GPU per proc) [default: SG]");
 DEFINE_string(op_type, XFERBENCH_OP_WRITE, "Op type: READ, WRITE");
-DEFINE_bool(check_consistency, false, "Enable Consistency Check");
 DEFINE_uint64(total_buffer_size, 8LL * 1024 * (1 << 20), "Total buffer \
               size across device for each process (Default: 80 GiB)");
-DEFINE_uint64(start_batch_size, 1, "Starting size of batch (Default: 1)");
-DEFINE_uint64(max_batch_size, 1, "Max size of batch (starts from 1)");
 DEFINE_int32(num_threads, 1,
              "Number of threads used by benchmark."
              " Num_iter must be greater or equal than num_threads and equally divisible by num_threads."
@@ -64,17 +57,12 @@ DEFINE_string(device_list, "all", "Comma-separated device name to use for \
 DEFINE_string(etcd_endpoints, "http://localhost:2379", "ETCD server endpoints for communication");
 
 std::string xferBenchConfig::backend = "";
-std::string xferBenchConfig::initiator_seg_type = "";
-std::string xferBenchConfig::target_seg_type = "";
 std::string xferBenchConfig::scheme = "";
 std::string xferBenchConfig::mode = "";
 std::string xferBenchConfig::op_type = "";
-bool xferBenchConfig::check_consistency = false;
 size_t xferBenchConfig::total_buffer_size = 0;
 int xferBenchConfig::num_initiator_dev = 0;
 int xferBenchConfig::num_target_dev = 0;
-size_t xferBenchConfig::start_batch_size = 0;
-size_t xferBenchConfig::max_batch_size = 0;
 int xferBenchConfig::num_threads = 0;
 bool xferBenchConfig::enable_pt = false;
 std::string xferBenchConfig::device_list = "";
@@ -85,18 +73,12 @@ int xferBenchConfig::loadFromFlags() {
     backend = FLAGS_backend;
     enable_pt = FLAGS_enable_pt;
     device_list = FLAGS_device_list;
-
-    initiator_seg_type = FLAGS_initiator_seg_type;
-    target_seg_type = FLAGS_target_seg_type;
     scheme = FLAGS_scheme;
     mode = FLAGS_mode;
     op_type = FLAGS_op_type;
-    check_consistency = FLAGS_check_consistency;
     total_buffer_size = FLAGS_total_buffer_size;
     num_initiator_dev = FLAGS_num_initiator_dev;
     num_target_dev = FLAGS_num_target_dev;
-    start_batch_size = FLAGS_start_batch_size;
-    max_batch_size = FLAGS_max_batch_size;
     num_threads = FLAGS_num_threads;
     etcd_endpoints = FLAGS_etcd_endpoints;
 
@@ -114,19 +96,12 @@ void xferBenchConfig::printConfig() {
                 << enable_pt << std::endl;
     std::cout << std::left << std::setw(60) << "Device list (--device_list=dev1,dev2,...)" << ": "
                 << device_list << std::endl;
-
-    std::cout << std::left << std::setw(60) << "Initiator seg type (--initiator_seg_type=[DRAM,VRAM])" << ": "
-              << initiator_seg_type << std::endl;
-    std::cout << std::left << std::setw(60) << "Target seg type (--target_seg_type=[DRAM,VRAM])" << ": "
-              << target_seg_type << std::endl;
     std::cout << std::left << std::setw(60) << "Scheme (--scheme=[pairwise,manytoone,onetomany,tp])" << ": "
               << scheme << std::endl;
     std::cout << std::left << std::setw(60) << "Mode (--mode=[SG,MG])" << ": "
               << mode << std::endl;
     std::cout << std::left << std::setw(60) << "Op type (--op_type=[READ,WRITE])" << ": "
               << op_type << std::endl;
-    std::cout << std::left << std::setw(60) << "Check consistency (--check_consistency=[0,1])" << ": "
-              << check_consistency << std::endl;
     std::cout << std::left << std::setw(60) << "Total buffer size (--total_buffer_size=N)" << ": "
               << total_buffer_size << std::endl;
     std::cout << std::left << std::setw(60) << "Num initiator dev (--num_initiator_dev=N)" << ": "
@@ -179,99 +154,6 @@ void xferBenchUtils::setDevToUse(std::string dev) {
 
 std::string xferBenchUtils::getDevToUse() {
     return dev_to_use;
-}
-
-static bool allBytesAre(void* buffer, size_t size, uint8_t value) {
-    uint8_t* byte_buffer = static_cast<uint8_t*>(buffer);
-
-    // Iterate over each byte in the buffer
-    for (size_t i = 0; i < size; ++i) {
-        if (byte_buffer[i] != value) {
-            return false; // Return false if any byte doesn't match the value
-        }
-    }
-    return true; // All bytes match the value
-}
-
-void xferBenchUtils::checkConsistency(std::vector<std::vector<xferBenchIOV>> &iov_lists) {
-    for (const auto &iov_list: iov_lists) {
-        for(const auto &iov: iov_list) {
-            void *addr = NULL;
-            size_t len;
-            uint8_t check_val = 0x00;
-            bool rc = false;
-            bool is_allocated = false;
-
-            len = iov.len;
-
-            if ((xferBenchConfig::backend == XFERBENCH_BACKEND_GDS) ||
-                (xferBenchConfig::backend == XFERBENCH_BACKEND_POSIX)) {
-                if (xferBenchConfig::op_type == XFERBENCH_OP_READ) {
-                    if (xferBenchConfig::initiator_seg_type == XFERBENCH_SEG_TYPE_VRAM) {
-#if HAVE_CUDA
-                        addr = calloc(1, len);
-                        is_allocated = true;
-                        CHECK_CUDA_ERROR(cudaMemcpy(addr, (void *)iov.addr, len,
-                                                    cudaMemcpyDeviceToHost), "cudaMemcpy failed");
-#else
-                        std::cerr << "Failure in consistency check: VRAM segment type not supported without CUDA"
-                                  << std::endl;
-                        exit(EXIT_FAILURE);
-#endif
-                    } else {
-                        addr = (void *)iov.addr;
-                    }
-                } else if (xferBenchConfig::op_type == XFERBENCH_OP_WRITE) {
-                    addr = calloc(1, len);
-                    is_allocated = true;
-                    ssize_t rc = pread(iov.devId, addr, len, iov.addr);
-                    if (rc < 0) {
-                        std::cerr << "Failed to read from device: " << iov.devId
-                                  << " with error: " << strerror(errno) << std::endl;
-                        exit(EXIT_FAILURE);
-                    }
-                }
-            } else {
-                // This will be called on target process in case of write and
-                // on initiator process in case of read
-                if ((xferBenchConfig::op_type == XFERBENCH_OP_WRITE &&
-                 xferBenchConfig::target_seg_type == XFERBENCH_SEG_TYPE_VRAM) ||
-                (xferBenchConfig::op_type == XFERBENCH_OP_READ &&
-                 xferBenchConfig::initiator_seg_type == XFERBENCH_SEG_TYPE_VRAM)) {
-#if HAVE_CUDA
-                    addr = calloc(1, len);
-                    is_allocated = true;
-                    CHECK_CUDA_ERROR(cudaMemcpy(addr, (void *)iov.addr, len,
-                                                cudaMemcpyDeviceToHost), "cudaMemcpy failed");
-#else
-                    std::cerr << "Failure in consistency check: VRAM segment type not supported without CUDA"
-                              << std::endl;
-                    exit(EXIT_FAILURE);
-#endif
-                } else if ((xferBenchConfig::op_type == XFERBENCH_OP_WRITE &&
-                            xferBenchConfig::target_seg_type == XFERBENCH_SEG_TYPE_DRAM) ||
-                           (xferBenchConfig::op_type == XFERBENCH_OP_READ &&
-                            xferBenchConfig::initiator_seg_type == XFERBENCH_SEG_TYPE_DRAM)) {
-                    addr = (void *)iov.addr;
-                }
-            }
-
-            if("WRITE" == xferBenchConfig::op_type) {
-                check_val = XFERBENCH_INITIATOR_BUFFER_ELEMENT;
-            } else if("READ" == xferBenchConfig::op_type) {
-                check_val = XFERBENCH_TARGET_BUFFER_ELEMENT;
-            }
-
-            rc = allBytesAre(addr, len, check_val);
-            if (true != rc) {
-                std::cerr << "Consistency check failed\n" << std::flush;
-            }
-            // Free the addr only if is allocated here
-            if (is_allocated) {
-                free(addr);
-            }
-        }
-    }
 }
 
 void xferBenchUtils::printStatsHeader() {

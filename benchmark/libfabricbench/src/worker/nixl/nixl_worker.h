@@ -59,12 +59,6 @@ class xferBenchNixlWorker: public xferBenchWorker {
     private:
         std::optional<xferBenchIOV> initBasicDescDram(size_t buffer_size, int mem_dev_id);
         void cleanupBasicDescDram(xferBenchIOV &basic_desc);
-#if HAVE_CUDA
-        std::optional<xferBenchIOV> initBasicDescVram(size_t buffer_size, int mem_dev_id);
-        void cleanupBasicDescVram(xferBenchIOV &basic_desc);
-#endif
-        std::optional<xferBenchIOV> initBasicDescFile(size_t buffer_size, int fd, int mem_dev_id);
-        void cleanupBasicDescFile(xferBenchIOV &basic_desc);
 };
 
 #endif // __NIXL_WORKER_H

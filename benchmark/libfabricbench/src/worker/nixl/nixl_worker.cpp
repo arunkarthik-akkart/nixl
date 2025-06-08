@@ -35,15 +35,6 @@
 #define USE_VMM 0
 #define ROUND_UP(value, granularity) ((((value) + (granularity) - 1) / (granularity)) * (granularity))
 
-static uintptr_t gds_running_ptr = 0x0;
-static std::vector<std::vector<xferBenchIOV>> gds_remote_iovs;
-static std::vector<std::vector<xferBenchIOV>> storage_remote_iovs;
-
-#if HAVE_CUDA
-static size_t __attribute__((unused)) padded_size = 0;
-static CUmemGenericAllocationHandle __attribute__((unused)) handle;
-#endif
-
 #define CHECK_NIXL_ERROR(result, message)                                         \
     do {                                                                          \
         if (0 != result) {                                                        \
@@ -53,35 +44,8 @@ static CUmemGenericAllocationHandle __attribute__((unused)) handle;
         }                                                                         \
     } while(0)
 
-#if HAVE_CUDA
-    #define HANDLE_VRAM_SEGMENT(_seg_type)                                        \
-        _seg_type = VRAM_SEG;
-#else
-    #define HANDLE_VRAM_SEGMENT(_seg_type)                                        \
-        std::cerr << "VRAM segment type not supported without CUDA" << std::endl; \
-        std::exit(EXIT_FAILURE);
-#endif
-
-#define GET_SEG_TYPE(is_initiator)                                                \
-    ({                                                                            \
-        std::string _seg_type_str = ((is_initiator) ?                             \
-                                     xferBenchConfig::initiator_seg_type :        \
-                                     xferBenchConfig::target_seg_type);           \
-        nixl_mem_t _seg_type;                                                     \
-        if (0 == _seg_type_str.compare("DRAM")) {                                 \
-            _seg_type = DRAM_SEG;                                                 \
-        } else if (0 == _seg_type_str.compare("VRAM")) {                          \
-            HANDLE_VRAM_SEGMENT(_seg_type);                                       \
-        } else {                                                                  \
-            std::cerr << "Invalid segment type: "                                 \
-                        << _seg_type_str << std::endl;                            \
-            exit(EXIT_FAILURE);                                                   \
-        }                                                                         \
-        _seg_type;                                                                \
-    })
-
 xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv, std::vector<std::string> devices) : xferBenchWorker(argc, argv) {
-    seg_type = GET_SEG_TYPE(isInitiator());
+    seg_type = DRAM_SEG;
 
     int rank;
     std::string backend_name;
@@ -194,87 +158,8 @@ std::optional<xferBenchIOV> xferBenchNixlWorker::initBasicDescDram(size_t buffer
     return std::optional<xferBenchIOV>(std::in_place, (uintptr_t)addr, buffer_size, mem_dev_id);
 }
 
-#if HAVE_CUDA
-static std::optional<xferBenchIOV> getVramDesc(int devid, size_t buffer_size,
-                                 bool isInit)
-{
-    void *addr;
-
-    CHECK_CUDA_ERROR(cudaSetDevice(devid), "Failed to set device");
-
-    CHECK_CUDA_ERROR(cudaMalloc(&addr, buffer_size), "Failed to allocate CUDA buffer");
-    if (isInit) {
-        CHECK_CUDA_ERROR(cudaMemset(addr, XFERBENCH_INITIATOR_BUFFER_ELEMENT, buffer_size), "Failed to set device");
-
-    } else {
-        CHECK_CUDA_ERROR(cudaMemset(addr, XFERBENCH_TARGET_BUFFER_ELEMENT, buffer_size), "Failed to set device");
-    }
-
-    return std::optional<xferBenchIOV>(std::in_place, (uintptr_t)addr, buffer_size, devid);
-}
-
-std::optional<xferBenchIOV> xferBenchNixlWorker::initBasicDescVram(size_t buffer_size, int mem_dev_id) {
-    if (IS_PAIRWISE_AND_SG()) {
-        int devid = rt->getRank();
-
-        if (isTarget()) {
-            devid -= xferBenchConfig::num_initiator_dev;
-        }
-
-        if (devid != mem_dev_id) {
-            return std::nullopt;
-        }
-    }
-
-    return getVramDesc(mem_dev_id, buffer_size, isInitiator());
-}
-#endif /* HAVE_CUDA */
-
-std::optional<xferBenchIOV> xferBenchNixlWorker::initBasicDescFile(size_t buffer_size, int fd, int mem_dev_id) {
-    auto ret = std::optional<xferBenchIOV>(std::in_place, (uintptr_t)gds_running_ptr, buffer_size, fd);
-    // Fill up with data
-    void *buf = (void *)malloc(buffer_size);
-    if (!buf) {
-        std::cerr << "Failed to allocate " << buffer_size
-                  << " bytes of memory" << std::endl;
-        return std::nullopt;
-    }
-    // File is always initialized with XFERBENCH_TARGET_BUFFER_ELEMENT
-    memset(buf, XFERBENCH_TARGET_BUFFER_ELEMENT, buffer_size);
-    int rc = pwrite(fd, buf, buffer_size, gds_running_ptr);
-    if (rc < 0) {
-        std::cerr << "Failed to write to file: " << fd
-                  << " with error: " << strerror(errno) << std::endl;
-        return std::nullopt;
-    }
-    free(buf);
-
-    gds_running_ptr += (buffer_size * mem_dev_id);
-
-    return ret;
-}
-
 void xferBenchNixlWorker::cleanupBasicDescDram(xferBenchIOV &iov) {
     free((void *)iov.addr);
-}
-
-#if HAVE_CUDA
-void xferBenchNixlWorker::cleanupBasicDescVram(xferBenchIOV &iov) {
-    CHECK_CUDA_ERROR(cudaSetDevice(iov.devId), "Failed to set device");
-#if !USE_VMM
-    CHECK_CUDA_ERROR(cudaFree((void *)iov.addr), "Failed to deallocate CUDA buffer");
-#else
-    CHECK_CUDA_DRIVER_ERROR(cuMemUnmap(iov.addr, iov.len),
-                         "Failed to unmap memory");
-    CHECK_CUDA_DRIVER_ERROR(cuMemRelease(handle),
-                         "Failed to release memory");
-    CHECK_CUDA_DRIVER_ERROR(cuMemAddressFree(iov.addr, padded_size), "Failed to free reserved address");
-#endif
-}
-#endif /* HAVE_CUDA */
-
-void xferBenchNixlWorker::cleanupBasicDescFile(xferBenchIOV &iov) {
-    close(iov.devId);
 }
 
 std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory(int num_lists) {
@@ -300,11 +185,6 @@ std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory(int n
             case DRAM_SEG:
                 basic_desc = initBasicDescDram(buffer_size, i);
                 break;
-#if HAVE_CUDA
-            case VRAM_SEG:
-                basic_desc = initBasicDescVram(buffer_size, i);
-                break;
-#endif
             default:
                 std::cerr << "Unsupported mem type: " << seg_type << std::endl;
                 exit(EXIT_FAILURE);
@@ -335,11 +215,6 @@ void xferBenchNixlWorker::deallocateMemory(std::vector<std::vector<xferBenchIOV>
             case DRAM_SEG:
                 cleanupBasicDescDram(iov);
                 break;
-#if HAVE_CUDA
-            case VRAM_SEG:
-                cleanupBasicDescVram(iov);
-                break;
-#endif
             default:
                 std::cerr << "Unsupported mem type: " << seg_type << std::endl;
                 exit(EXIT_FAILURE);
@@ -473,13 +348,8 @@ static int execTransfer(nixlAgent *agent,
         const auto &remote_iov = remote_iovs[tid];
 
         // TODO: fetch local_desc and remote_desc directly from config
-        nixl_xfer_dlist_t local_desc(GET_SEG_TYPE(true));
-        nixl_xfer_dlist_t remote_desc(GET_SEG_TYPE(false));
-
-        if ((XFERBENCH_BACKEND_GDS == xferBenchConfig::backend) ||
-            (XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend)) {
-            remote_desc = nixl_xfer_dlist_t(FILE_SEG);
-        }
+        nixl_xfer_dlist_t local_desc(DRAM_SEG);
+        nixl_xfer_dlist_t remote_desc(DRAM_SEG);
 
         iovListToNixlXferDlist(local_iov, local_desc);
         iovListToNixlXferDlist(remote_iov, remote_desc);
@@ -491,19 +361,12 @@ static int execTransfer(nixlAgent *agent,
         nixl_status_t rc;
         std::string target;
 
-        if (XFERBENCH_BACKEND_GDS == xferBenchConfig::backend) {
-            target = "initiator";
-        } else if (XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend) {
-            target = "initiator";
-        } else {
-            params.notifMsg = "0xBEEF";
-            params.hasNotif = true;
-            target = "target";
-        }
+        params.notifMsg = "0xBEEF";
+        params.hasNotif = true;
+        target = "target";
 
         CHECK_NIXL_ERROR(agent->createXferReq(op, local_desc, remote_desc, target,
                                             req, &params), "createTransferReq failed");
-
 
         rc = agent->postXferReq(req);
         if (NIXL_ERR_BACKEND == rc) {

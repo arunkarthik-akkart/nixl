@@ -98,53 +98,35 @@ static std::vector<std::vector<xferBenchIOV>> createTransferDescLists(xferBenchW
 static int processBatchSizes(xferBenchWorker &worker,
                              std::vector<std::vector<xferBenchIOV>> &iov_lists,
                              size_t block_size, int num_threads) {
-    for (size_t batch_size = xferBenchConfig::start_batch_size;
-         !worker.signaled() &&
-             batch_size <= xferBenchConfig::max_batch_size;
-         batch_size *= 2) {
-        auto local_trans_lists = createTransferDescLists(worker,
-                                                         iov_lists,
-                                                         block_size,
-                                                         batch_size,
-                                                         num_threads);
+    size_t batch_size = 1;
 
-        if (worker.isTarget()) {
-            worker.exchangeIOV(local_trans_lists);
-            worker.poll(block_size);
+    auto local_trans_lists = createTransferDescLists(worker,
+                                                        iov_lists,
+                                                        block_size,
+                                                        batch_size,
+                                                        num_threads);
 
-            if (xferBenchConfig::check_consistency && xferBenchConfig::op_type == XFERBENCH_OP_WRITE) {
-                xferBenchUtils::checkConsistency(local_trans_lists);
-            }
-            if (IS_PAIRWISE_AND_SG()) {
-                // TODO: This is here just to call throughput reduction
-                // Separate reduction and print
-                xferBenchUtils::printStats(true, block_size, batch_size, 0);
-            }
-        } else if (worker.isInitiator()) {
-            std::vector<std::vector<xferBenchIOV>> remote_trans_lists(worker.exchangeIOV(local_trans_lists));
+    if (worker.isTarget()) {
+        worker.exchangeIOV(local_trans_lists);
+        worker.poll(block_size);
 
-            auto result = worker.transfer(block_size,
-                                          local_trans_lists,
-                                          remote_trans_lists);
-            if (std::holds_alternative<int>(result)) {
-                return 1;
-            }
-
-            if (xferBenchConfig::check_consistency) {
-                if (xferBenchConfig::op_type == XFERBENCH_OP_READ) {
-                    xferBenchUtils::checkConsistency(local_trans_lists);
-                } else if (xferBenchConfig::op_type == XFERBENCH_OP_WRITE) {
-                    // Only storage backends support consistency check for write on initiator
-                    if ((xferBenchConfig::backend == XFERBENCH_BACKEND_GDS) ||
-                        (xferBenchConfig::backend == XFERBENCH_BACKEND_POSIX)) {
-                        xferBenchUtils::checkConsistency(remote_trans_lists);
-                    }
-                }
-            }
-
-            xferBenchUtils::printStats(false, block_size, batch_size,
-                                    std::get<double>(result));
+        if (IS_PAIRWISE_AND_SG()) {
+            // TODO: This is here just to call throughput reduction
+            // Separate reduction and print
+            xferBenchUtils::printStats(true, block_size, batch_size, 0);
         }
+    } else if (worker.isInitiator()) {
+        std::vector<std::vector<xferBenchIOV>> remote_trans_lists(worker.exchangeIOV(local_trans_lists));
+
+        auto result = worker.transfer(block_size,
+                                        local_trans_lists,
+                                        remote_trans_lists);
+        if (std::holds_alternative<int>(result)) {
+            return 1;
+        }
+
+        xferBenchUtils::printStats(false, block_size, batch_size,
+                                std::get<double>(result));
     }
 
     return 0;

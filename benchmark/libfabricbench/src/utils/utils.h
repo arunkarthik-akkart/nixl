@@ -27,31 +27,6 @@
 #include <optional>
 #include "runtime/runtime.h"
 
-#if HAVE_CUDA
-#include <cuda.h>
-#include <cuda_runtime.h>
-
-#define CHECK_CUDA_ERROR(result, message)                                           \
-    do {                                                                            \
-        if (result != cudaSuccess) {                                                \
-            std::cerr << "CUDA: " << message << " (Error code: " << result          \
-                      << " - " << cudaGetErrorString(result) << ")" << std::endl;   \
-            exit(EXIT_FAILURE);                                                     \
-        }                                                                           \
-    } while(0)
-
-#define CHECK_CUDA_DRIVER_ERROR(result, message)                                    \
-    do {                                                                            \
-        if (result != CUDA_SUCCESS) {                                               \
-            const char *error_str;                                                  \
-            cuGetErrorString(result, &error_str);                                   \
-            std::cerr << "CUDA Driver: " << message << " (Error code: "             \
-                      << result << " - " << error_str << ")" << std::endl;          \
-            exit(EXIT_FAILURE);                                                     \
-        }                                                                           \
-    } while(0)
-#endif
-
 // TODO: This is true for CX-7, need support for other CX cards and NVLink
 #define MAXBW 50.0 // 400 Gbps or 50 GB/sec
 #define LARGE_BLOCK_SIZE (1LL * (1 << 20))
@@ -65,13 +40,6 @@
 
 // Backend types
 #define XFERBENCH_BACKEND_UCX "UCX"
-#define XFERBENCH_BACKEND_UCX_MO "UCX_MO"
-#define XFERBENCH_BACKEND_GDS "GDS"
-#define XFERBENCH_BACKEND_POSIX "POSIX"
-
-// POSIX API types
-#define XFERBENCH_POSIX_API_AIO "AIO"
-#define XFERBENCH_POSIX_API_URING "URING"
 
 // Scheme types for transfer patterns
 #define XFERBENCH_SCHEME_PAIRWISE     "pairwise"
@@ -87,14 +55,6 @@
 #define XFERBENCH_MODE_SG  "SG"
 #define XFERBENCH_MODE_MG  "MG"
 
-// Segment types
-#define XFERBENCH_SEG_TYPE_DRAM "DRAM"
-#define XFERBENCH_SEG_TYPE_VRAM "VRAM"
-
-// Worker types
-#define XFERBENCH_WORKER_NIXL     "nixl"
-#define XFERBENCH_WORKER_NVSHMEM  "nvshmem"
-
 #define IS_PAIRWISE_AND_SG() (XFERBENCH_SCHEME_PAIRWISE == xferBenchConfig::scheme && \
                               XFERBENCH_MODE_SG == xferBenchConfig::mode)
 #define IS_PAIRWISE_AND_MG() (XFERBENCH_SCHEME_PAIRWISE == xferBenchConfig::scheme && \
@@ -103,29 +63,16 @@ class xferBenchConfig {
     public:
         static std::string worker_type;
         static std::string backend;
-        static std::string initiator_seg_type;
-        static std::string target_seg_type;
         static std::string scheme;
         static std::string mode;
         static std::string op_type;
-        static bool check_consistency;
         static size_t total_buffer_size;
         static int num_initiator_dev;
         static int num_target_dev;
-        static size_t start_batch_size;
-        static size_t max_batch_size;
         static int num_threads;
         static bool enable_pt;
         static std::string device_list;
         static std::string etcd_endpoints;
-        static std::string gds_filepath;
-        static int num_files;
-        static std::string posix_api_type;
-        static std::string posix_filepath;
-        static bool storage_enable_direct;
-        static int gds_batch_pool_size;
-        static int gds_batch_limit;
-
         static int loadFromFlags();
         static void printConfig();
         static std::vector<std::string> parseDeviceList();
@@ -150,7 +97,6 @@ class xferBenchUtils {
         static void setDevToUse(std::string dev);
         static std::string getDevToUse();
 
-        static void checkConsistency(std::vector<std::vector<xferBenchIOV>> &desc_lists);
         static void printStatsHeader();
         static void printStats(bool is_target, size_t block_size, size_t batch_size,
 			                   double total_duration);
