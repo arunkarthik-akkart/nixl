@@ -34,19 +34,11 @@ int xferBenchRT::recvInt(int *buffer, int src_rank) {
     return 0;
 }
 
-int xferBenchRT::broadcastInt(int *buffer, size_t count, int root_rank) {
-    return 0;
-}
-
 int xferBenchRT::sendChar(char *buffer, size_t count, int dest_rank) {
     return 0;
 }
 
 int xferBenchRT::recvChar(char *buffer, size_t count, int src_rank) {
-    return 0;
-}
-
-int xferBenchRT::reduceSumDouble(double *local_buffer, double *global_buffer, int dest_rank) {
     return 0;
 }
 
