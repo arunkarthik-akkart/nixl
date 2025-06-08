@@ -201,14 +201,11 @@ int main(int argc, char *argv[]) {
         xferBenchUtils::printStatsHeader();
     }
 
-    for (size_t block_size = xferBenchConfig::start_block_size;
-         !worker_ptr->signaled() &&
-         block_size <= xferBenchConfig::max_block_size;
-         block_size *= 2) {
-        ret = processBatchSizes(*worker_ptr, iov_lists, block_size, num_threads);
-        if (0 != ret) {
-            return EXIT_FAILURE;
-        }
+    size_t block_size = 16*1024;
+
+    ret = processBatchSizes(*worker_ptr, iov_lists, block_size, num_threads);
+    if (0 != ret) {
+        return EXIT_FAILURE;
     }
 
     ret = worker_ptr->synchronize(); // Make sure environment is not used anymore

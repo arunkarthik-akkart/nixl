@@ -22,20 +22,17 @@
 #include <unistd.h>
 
 static xferBenchRT *createRT(int *terminate) {
-    if (XFERBENCH_RT_ETCD == xferBenchConfig::runtime_type) {
-        int total = 2;
-        if (XFERBENCH_MODE_SG == xferBenchConfig::mode) {
-            total = xferBenchConfig::num_initiator_dev +
-                xferBenchConfig::num_target_dev;
-        }
-        if ((XFERBENCH_BACKEND_GDS == xferBenchConfig::backend) ||
-            (XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend)) {
-            total = 1;
-        }
-        return new xferBenchEtcdRT(xferBenchConfig::etcd_endpoints, total, terminate);
+    int total = 2;
+    if (XFERBENCH_MODE_SG == xferBenchConfig::mode) {
+        total = xferBenchConfig::num_initiator_dev +
+            xferBenchConfig::num_target_dev;
     }
+    if ((XFERBENCH_BACKEND_GDS == xferBenchConfig::backend) ||
+        (XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend)) {
+        total = 1;
+    }
+    return new xferBenchEtcdRT(xferBenchConfig::etcd_endpoints, total, terminate);
 
-    std::cerr << "Invalid runtime: " << xferBenchConfig::runtime_type << std::endl;
     exit(EXIT_FAILURE);
 }
 

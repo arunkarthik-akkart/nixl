@@ -34,8 +34,6 @@
 /**********
  * xferBench Config
  **********/
-DEFINE_string(runtime_type, XFERBENCH_RT_ETCD, "Runtime type to use for communication [ETCD]");
-DEFINE_string(worker_type, XFERBENCH_WORKER_NIXL, "Type of worker [nixl, nvshmem]");
 DEFINE_string(backend, XFERBENCH_BACKEND_UCX, "Name of communication backend [UCX, UCX_MO, GDS, POSIX] \
               (only used with nixl worker)");
 DEFINE_string(initiator_seg_type, XFERBENCH_SEG_TYPE_DRAM, "Type of memory segment for initiator \
@@ -48,26 +46,15 @@ DEFINE_string(op_type, XFERBENCH_OP_WRITE, "Op type: READ, WRITE");
 DEFINE_bool(check_consistency, false, "Enable Consistency Check");
 DEFINE_uint64(total_buffer_size, 8LL * 1024 * (1 << 20), "Total buffer \
               size across device for each process (Default: 80 GiB)");
-DEFINE_uint64(start_block_size, 4 * (1 << 10), "Max size of block \
-              (Default: 4 KiB)");
-DEFINE_uint64(max_block_size, 64 * (1 << 20), "Max size of block \
-              (Default: 64 MiB)");
 DEFINE_uint64(start_batch_size, 1, "Starting size of batch (Default: 1)");
 DEFINE_uint64(max_batch_size, 1, "Max size of batch (starts from 1)");
-DEFINE_int32(num_iter, 1000, "Max iterations");
-DEFINE_int32(warmup_iter, 100, "Number of warmup iterations before timing");
 DEFINE_int32(num_threads, 1,
              "Number of threads used by benchmark."
              " Num_iter must be greater or equal than num_threads and equally divisible by num_threads."
              " (Default: 1)");
-DEFINE_int32(num_files, 1, "Number of files used by benchmark");
 DEFINE_int32(num_initiator_dev, 1, "Number of device in initiator process");
 DEFINE_int32(num_target_dev, 1, "Number of device in target process");
 DEFINE_bool(enable_pt, false, "Enable Progress Thread (only used with nixl worker)");
-// GDS options - only used when backend is GDS
-DEFINE_string(gds_filepath, "", "File path for GDS operations (only used with GDS backend)");
-DEFINE_int32(gds_batch_pool_size, 32, "Batch pool size for GDS operations (default: 32, only used with GDS backend)");
-DEFINE_int32(gds_batch_limit, 128, "Batch limit for GDS operations (default: 128, only used with GDS backend)");
 
 // TODO: We should take rank wise device list as input to extend support
 // <rank>:<device_list>, ...
@@ -76,13 +63,6 @@ DEFINE_string(device_list, "all", "Comma-separated device name to use for \
 		      communication (only used with nixl worker)");
 DEFINE_string(etcd_endpoints, "http://localhost:2379", "ETCD server endpoints for communication");
 
-// POSIX options - only used when backend is POSIX
-DEFINE_string(posix_api_type, XFERBENCH_POSIX_API_AIO, "API type for POSIX operations [AIO, URING] (only used with POSIX backend)");
-DEFINE_string(posix_filepath, "", "File path for POSIX operations (only used with POSIX backend)");
-DEFINE_bool(storage_enable_direct, false, "Enable direct I/O for storage operations (only used with POSIX backend)");
-
-std::string xferBenchConfig::runtime_type = "";
-std::string xferBenchConfig::worker_type = "";
 std::string xferBenchConfig::backend = "";
 std::string xferBenchConfig::initiator_seg_type = "";
 std::string xferBenchConfig::target_seg_type = "";
@@ -93,60 +73,18 @@ bool xferBenchConfig::check_consistency = false;
 size_t xferBenchConfig::total_buffer_size = 0;
 int xferBenchConfig::num_initiator_dev = 0;
 int xferBenchConfig::num_target_dev = 0;
-size_t xferBenchConfig::start_block_size = 0;
-size_t xferBenchConfig::max_block_size = 0;
 size_t xferBenchConfig::start_batch_size = 0;
 size_t xferBenchConfig::max_batch_size = 0;
-int xferBenchConfig::num_iter = 0;
-int xferBenchConfig::warmup_iter = 0;
 int xferBenchConfig::num_threads = 0;
 bool xferBenchConfig::enable_pt = false;
 std::string xferBenchConfig::device_list = "";
 std::string xferBenchConfig::etcd_endpoints = "";
-std::string xferBenchConfig::gds_filepath = "";
-int xferBenchConfig::gds_batch_pool_size = 0;
-int xferBenchConfig::gds_batch_limit = 0;
 std::vector<std::string> devices = { };
-int xferBenchConfig::num_files = 0;
-std::string xferBenchConfig::posix_api_type = "";
-std::string xferBenchConfig::posix_filepath = "";
-bool xferBenchConfig::storage_enable_direct = false;
 
 int xferBenchConfig::loadFromFlags() {
-    runtime_type = FLAGS_runtime_type;
-    worker_type = FLAGS_worker_type;
-
-    // Only load NIXL-specific configurations if using NIXL worker
-    if (worker_type == XFERBENCH_WORKER_NIXL) {
-        backend = FLAGS_backend;
-        enable_pt = FLAGS_enable_pt;
-        device_list = FLAGS_device_list;
-
-        // Load GDS-specific configurations if backend is GDS
-        if (backend == XFERBENCH_BACKEND_GDS) {
-            gds_filepath = FLAGS_gds_filepath;
-            gds_batch_pool_size = FLAGS_gds_batch_pool_size;
-            gds_batch_limit = FLAGS_gds_batch_limit;
-            num_files = FLAGS_num_files;
-            storage_enable_direct = FLAGS_storage_enable_direct;
-        }
-
-        // Load POSIX-specific configurations if backend is POSIX
-        if (backend == XFERBENCH_BACKEND_POSIX) {
-            posix_api_type = FLAGS_posix_api_type;
-            posix_filepath = FLAGS_posix_filepath;
-            storage_enable_direct = FLAGS_storage_enable_direct;
-            num_files = FLAGS_num_files;
-
-            // Validate POSIX API type
-            if (posix_api_type != XFERBENCH_POSIX_API_AIO &&
-                posix_api_type != XFERBENCH_POSIX_API_URING) {
-                std::cerr << "Invalid POSIX API type: " << posix_api_type
-                          << ". Must be one of [AIO, URING]" << std::endl;
-                return -1;
-            }
-        }
-    }
+    backend = FLAGS_backend;
+    enable_pt = FLAGS_enable_pt;
+    device_list = FLAGS_device_list;
 
     initiator_seg_type = FLAGS_initiator_seg_type;
     target_seg_type = FLAGS_target_seg_type;
@@ -157,80 +95,10 @@ int xferBenchConfig::loadFromFlags() {
     total_buffer_size = FLAGS_total_buffer_size;
     num_initiator_dev = FLAGS_num_initiator_dev;
     num_target_dev = FLAGS_num_target_dev;
-    start_block_size = FLAGS_start_block_size;
-    max_block_size = FLAGS_max_block_size;
     start_batch_size = FLAGS_start_batch_size;
     max_batch_size = FLAGS_max_batch_size;
-    num_iter = FLAGS_num_iter;
-    warmup_iter = FLAGS_warmup_iter;
     num_threads = FLAGS_num_threads;
     etcd_endpoints = FLAGS_etcd_endpoints;
-    num_files = FLAGS_num_files;
-    posix_api_type = FLAGS_posix_api_type;
-    posix_filepath = FLAGS_posix_filepath;
-    storage_enable_direct = FLAGS_storage_enable_direct;
-
-    if (worker_type == XFERBENCH_WORKER_NVSHMEM) {
-        if (!((XFERBENCH_SEG_TYPE_VRAM == initiator_seg_type) &&
-              (XFERBENCH_SEG_TYPE_VRAM == target_seg_type) &&
-              (1 == num_threads) &&
-              (1 == num_initiator_dev) &&
-              (1 == num_target_dev) &&
-              (XFERBENCH_SCHEME_PAIRWISE == scheme))) {
-            std::cerr << "Unsupported configuration for NVSHMEM worker" << std::endl;
-            std::cerr << "Supported configuration: " << std::endl;
-            std::cerr << std::string(20, '*') << std::endl;
-            std::cerr << "initiator_seg_type = VRAM" << std::endl;
-            std::cerr << "target_seg_type = VRAM" << std::endl;
-            std::cerr << "num_threads = 1" << std::endl;
-            std::cerr << "num_initiator_dev = 1" << std::endl;
-            std::cerr << "num_target_dev = 1" << std::endl;
-            std::cerr << "scheme = pairwise" << std::endl;
-            std::cerr << std::string(20, '*') << std::endl;
-            return -1;
-        }
-    }
-
-    if ((max_block_size * max_batch_size) > (total_buffer_size / num_initiator_dev)) {
-        std::cerr << "Incorrect buffer size configuration for Initiator"
-                  << "(max_block_size * max_batch_size) is > (total_buffer_size / num_initiator_dev)"
-                  << std::endl;
-        return -1;
-    }
-    if ((max_block_size * max_batch_size) > (total_buffer_size / num_target_dev)) {
-        std::cerr << "Incorrect buffer size configuration for Target"
-                  << "(max_block_size * max_batch_size) is > (total_buffer_size / num_initiator_dev)"
-                  << std::endl;
-        return -1;
-    }
-
-    int partition = (num_threads * LARGE_BLOCK_SIZE_ITER_FACTOR);
-    if (num_iter % partition) {
-        num_iter += partition - (num_iter % partition);
-        std::cout << "WARNING: Adjusting num_iter to " << num_iter
-                  << " to allow equal distribution to " << num_threads << " threads"
-                  << std::endl;
-    }
-    if (warmup_iter % partition) {
-        warmup_iter += partition - (warmup_iter % partition);
-        std::cout << "WARNING: Adjusting warmup_iter to " << warmup_iter
-                  << " to allow equal distribution to " << num_threads << " threads"
-                  << std::endl;
-    }
-    partition = (num_initiator_dev * num_threads);
-    if (total_buffer_size % partition) {
-        std::cerr << "Total_buffer_size must be divisible by the product of num_threads and num_initiator_dev"
-                  << ", next such value is " << total_buffer_size + partition - (total_buffer_size % partition)
-                  << std::endl;
-        return -1;
-    }
-    partition = (num_target_dev * num_threads);
-    if (total_buffer_size % partition) {
-        std::cerr << "Total_buffer_size must be divisible by the product of num_threads and num_target_dev"
-                  << ", next such value is " << total_buffer_size + partition - (total_buffer_size % partition)
-                  << std::endl;
-        return -1;
-    }
 
     return 0;
 }
@@ -239,48 +107,14 @@ void xferBenchConfig::printConfig() {
     std::cout << std::string(70, '*') << std::endl;
     std::cout << "NIXLBench Configuration" << std::endl;
     std::cout << std::string(70, '*') << std::endl;
-    std::cout << std::left << std::setw(60) << "Runtime (--runtime_type=[etcd])" << ": "
-              << runtime_type << std::endl;
-    if (runtime_type == XFERBENCH_RT_ETCD) {
-        std::cout << std::left << std::setw(60) << "ETCD Endpoint " << ": "
-	          << etcd_endpoints << std::endl;
-    }
-    std::cout << std::left << std::setw(60) << "Worker type (--worker_type=[nixl,nvshmem])" << ": "
-              << worker_type << std::endl;
-    if (worker_type == XFERBENCH_WORKER_NIXL) {
-        std::cout << std::left << std::setw(60) << "Backend (--backend=[UCX,UCX_MO,GDS,POSIX])" << ": "
-                  << backend << std::endl;
-        std::cout << std::left << std::setw(60) << "Enable pt (--enable_pt=[0,1])" << ": "
-                  << enable_pt << std::endl;
-        std::cout << std::left << std::setw(60) << "Device list (--device_list=dev1,dev2,...)" << ": "
-                  << device_list << std::endl;
 
-        // Print GDS options if backend is GDS
-        if (backend == XFERBENCH_BACKEND_GDS) {
-            std::cout << std::left << std::setw(60) << "GDS filepath (--gds_filepath=path)" << ": "
-                      << gds_filepath << std::endl;
-            std::cout << std::left << std::setw(60) << "GDS batch pool size (--gds_batch_pool_size=N)" << ": "
-                      << gds_batch_pool_size << std::endl;
-            std::cout << std::left << std::setw(60) << "GDS batch limit (--gds_batch_limit=N)" << ": "
-                      << gds_batch_limit << std::endl;
-            std::cout << std::left << std::setw(60) << "GDS enable direct (--gds_enable_direct=[0,1])" << ": "
-                      << storage_enable_direct << std::endl;
-            std::cout << std::left << std::setw(60) << "Number of files (--num_files=N)" << ": "
-                      << num_files << std::endl;
-        }
+    std::cout << std::left << std::setw(60) << "Backend (--backend=[UCX])" << ": "
+                << backend << std::endl;
+    std::cout << std::left << std::setw(60) << "Enable pt (--enable_pt=[0,1])" << ": "
+                << enable_pt << std::endl;
+    std::cout << std::left << std::setw(60) << "Device list (--device_list=dev1,dev2,...)" << ": "
+                << device_list << std::endl;
 
-        // Print POSIX options if backend is POSIX
-        if (backend == XFERBENCH_BACKEND_POSIX) {
-            std::cout << std::left << std::setw(60) << "POSIX API type (--posix_api_type=[AIO,URING])" << ": "
-                      << posix_api_type << std::endl;
-            std::cout << std::left << std::setw(60) << "POSIX filepath (--posix_filepath=path)" << ": "
-                      << posix_filepath << std::endl;
-            std::cout << std::left << std::setw(60) << "POSIX enable direct (--storage_enable_direct=[0,1])" << ": "
-                      << storage_enable_direct << std::endl;
-            std::cout << std::left << std::setw(60) << "Number of files (--num_files=N)" << ": "
-                      << num_files << std::endl;
-        }
-    }
     std::cout << std::left << std::setw(60) << "Initiator seg type (--initiator_seg_type=[DRAM,VRAM])" << ": "
               << initiator_seg_type << std::endl;
     std::cout << std::left << std::setw(60) << "Target seg type (--target_seg_type=[DRAM,VRAM])" << ": "
@@ -299,20 +133,6 @@ void xferBenchConfig::printConfig() {
               << num_initiator_dev << std::endl;
     std::cout << std::left << std::setw(60) << "Num target dev (--num_target_dev=N)" << ": "
               << num_target_dev << std::endl;
-    std::cout << std::left << std::setw(60) << "Start block size (--start_block_size=N)" << ": "
-              << start_block_size << std::endl;
-    std::cout << std::left << std::setw(60) << "Max block size (--max_block_size=N)" << ": "
-              << max_block_size << std::endl;
-    std::cout << std::left << std::setw(60) << "Start batch size (--start_batch_size=N)" << ": "
-              << start_batch_size << std::endl;
-    std::cout << std::left << std::setw(60) << "Max batch size (--max_batch_size=N)" << ": "
-              << max_batch_size << std::endl;
-    std::cout << std::left << std::setw(60) << "Num iter (--num_iter=N)" << ": "
-              << num_iter << std::endl;
-    std::cout << std::left << std::setw(60) << "Warmup iter (--warmup_iter=N)" << ": "
-              << warmup_iter << std::endl;
-    std::cout << std::left << std::setw(60) << "Num threads (--num_threads=N)" << ": "
-              << num_threads << std::endl;
     std::cout << std::string(80, '-') << std::endl;
     std::cout << std::endl;
 }
@@ -482,12 +302,6 @@ void xferBenchUtils::printStats(bool is_target, size_t block_size, size_t batch_
     double avg_latency = 0, throughput = 0, throughput_gib = 0, throughput_gb = 0;
     double totalbw = 0;
 
-    int num_iter = xferBenchConfig::num_iter;
-
-    if (block_size > LARGE_BLOCK_SIZE) {
-        num_iter /= LARGE_BLOCK_SIZE_ITER_FACTOR;
-    }
-
     // TODO: We can avoid this by creating a sub-communicator across initiator ranks
     // if (isTarget() && IS_PAIRWISE_AND_SG() && rt->getSize() > 2) { - Fix this isTarget can not be called here
     if (is_target && IS_PAIRWISE_AND_SG() && rt->getSize() > 2) {
@@ -495,8 +309,8 @@ void xferBenchUtils::printStats(bool is_target, size_t block_size, size_t batch_
         return;
     }
 
-    total_data_transferred = ((block_size * batch_size) * num_iter); // In Bytes
-    avg_latency = (total_duration / (num_iter * batch_size)); // In microsec
+    total_data_transferred = ((block_size * batch_size) * 1); // In Bytes
+    avg_latency = (total_duration / (1 * batch_size)); // In microsec
     if (IS_PAIRWISE_AND_MG()) {
         total_data_transferred *= xferBenchConfig::num_initiator_dev; // In Bytes
         avg_latency /= xferBenchConfig::num_initiator_dev; // In microsec

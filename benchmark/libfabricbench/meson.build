@@ -14,7 +14,7 @@
 # limitations under the License.
 
 project('nixlbench', 'CPP', version: '0.3.0',
-    default_options: ['buildtype=release',
+    default_options: ['buildtype=debug',
                 'werror=true',
                 'cpp_std=c++17',
                 'prefix=/usr/local/nixlbench'],
@@ -131,14 +131,6 @@ endif
 
 
 executable('nixlbench', 'src/main.cpp',
-            include_directories: inc_dir,
-            link_with: [nixlbench_runtimes, utils_lib, worker_libs],
-            dependencies: deps,
-            link_args: args,
-            install: true,
-            install_dir: get_option('bindir'))
-
-executable('p2p_transfer', 'src/p2p_main.cpp',
             include_directories: inc_dir,
             link_with: [nixlbench_runtimes, utils_lib, worker_libs],
             dependencies: deps,

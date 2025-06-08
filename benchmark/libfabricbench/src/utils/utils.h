@@ -101,7 +101,6 @@
                               XFERBENCH_MODE_MG == xferBenchConfig::mode)
 class xferBenchConfig {
     public:
-        static std::string runtime_type;
         static std::string worker_type;
         static std::string backend;
         static std::string initiator_seg_type;
@@ -113,12 +112,8 @@ class xferBenchConfig {
         static size_t total_buffer_size;
         static int num_initiator_dev;
         static int num_target_dev;
-        static size_t start_block_size;
-        static size_t max_block_size;
         static size_t start_batch_size;
         static size_t max_batch_size;
-        static int num_iter;
-        static int warmup_iter;
         static int num_threads;
         static bool enable_pt;
         static std::string device_list;

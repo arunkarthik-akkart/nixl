@@ -462,7 +462,6 @@ static int execTransfer(nixlAgent *agent,
                         const std::vector<std::vector<xferBenchIOV>> &local_iovs,
                         const std::vector<std::vector<xferBenchIOV>> &remote_iovs,
                         const nixl_xfer_op_t op,
-                        const int num_iter,
                         const int num_threads)
 {
     int ret = 0;
@@ -505,22 +504,21 @@ static int execTransfer(nixlAgent *agent,
         CHECK_NIXL_ERROR(agent->createXferReq(op, local_desc, remote_desc, target,
                                             req, &params), "createTransferReq failed");
 
-        for (int i = 0; i < num_iter && !error; i++) {
-            rc = agent->postXferReq(req);
-            if (NIXL_ERR_BACKEND == rc) {
-                std::cout << "NIXL postRequest failed" << std::endl;
-                error = true;
-            } else {
-                do {
-                    /* XXX agent isn't const because the getXferStatus() is not const  */
-                    rc = agent->getXferStatus(req);
-                    if (NIXL_ERR_BACKEND == rc) {
-                        std::cout << "NIXL getStatus failed" << std::endl;
-                        error = true;
-                        break;
-                    }
-                } while (NIXL_SUCCESS != rc);
-            }
+
+        rc = agent->postXferReq(req);
+        if (NIXL_ERR_BACKEND == rc) {
+            std::cout << "NIXL postRequest failed" << std::endl;
+            error = true;
+        } else {
+            do {
+                /* XXX agent isn't const because the getXferStatus() is not const  */
+                rc = agent->getXferStatus(req);
+                if (NIXL_ERR_BACKEND == rc) {
+                    std::cout << "NIXL getStatus failed" << std::endl;
+                    error = true;
+                    break;
+                }
+            } while (NIXL_SUCCESS != rc);
         }
 
         agent->releaseXferReq(req);
@@ -536,31 +534,23 @@ static int execTransfer(nixlAgent *agent,
 std::variant<double, int> xferBenchNixlWorker::transfer(size_t block_size,
                                                const std::vector<std::vector<xferBenchIOV>> &local_iovs,
                                                const std::vector<std::vector<xferBenchIOV>> &remote_iovs) {
-    int num_iter = xferBenchConfig::num_iter / xferBenchConfig::num_threads;
-    int skip = xferBenchConfig::warmup_iter / xferBenchConfig::num_threads;
     struct timeval t_start, t_end;
     double total_duration = 0.0;
     int ret = 0;
     nixl_xfer_op_t xfer_op = XFERBENCH_OP_READ == xferBenchConfig::op_type ? NIXL_READ : NIXL_WRITE;
     // int completion_flag = 1;
 
-    // Reduce skip by 10x for large block sizes
-    if (block_size > LARGE_BLOCK_SIZE) {
-        skip /= LARGE_BLOCK_SIZE_ITER_FACTOR;
-        num_iter /= LARGE_BLOCK_SIZE_ITER_FACTOR;
-    }
-
-    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op, skip, xferBenchConfig::num_threads);
+    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op, xferBenchConfig::num_threads);
     if (ret < 0) {
         return std::variant<double, int>(ret);
     }
-
+    
     // Synchronize to ensure all processes have completed the warmup (iter and polling)
     synchronize();
 
     gettimeofday(&t_start, nullptr);
 
-    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op, num_iter, xferBenchConfig::num_threads);
+    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op, xferBenchConfig::num_threads);
 
     gettimeofday(&t_end, nullptr);
     total_duration += (((t_end.tv_sec - t_start.tv_sec) * 1e6) +
@@ -571,16 +561,8 @@ std::variant<double, int> xferBenchNixlWorker::transfer(size_t block_size,
 
 void xferBenchNixlWorker::poll(size_t block_size) {
     nixl_notifs_t notifs;
-    int skip = 0, num_iter = 0, total_iter = 0;
-
-    skip = xferBenchConfig::warmup_iter;
-    num_iter = xferBenchConfig::num_iter;
-    // Reduce skip by 10x for large block sizes
-    if (block_size > LARGE_BLOCK_SIZE) {
-        skip /= LARGE_BLOCK_SIZE_ITER_FACTOR;
-        num_iter /= LARGE_BLOCK_SIZE_ITER_FACTOR;
-    }
-    total_iter = skip + num_iter;
+    int skip = 1;
+    int total_iter = 2;
 
     /* Ensure warmup is done*/
     while (skip != int(notifs["initiator"].size())) {
