@@ -99,10 +99,7 @@ xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv, std::vector<st
 
     agent->getAvailPlugins(plugins);
 
-    if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX) ||
-        0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX_MO) ||
-        0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_GDS) ||
-        0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_POSIX)){
+    if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX)){
         backend_name = xferBenchConfig::backend;
     } else {
         std::cerr << "Unsupported backend: " << xferBenchConfig::backend << std::endl;
@@ -111,21 +108,14 @@ xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv, std::vector<st
 
     agent->getPluginParams(backend_name, mems, backend_params);
 
-    if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX) ||
-        0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX_MO)){
+    if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX)){
         // No need to set device_list if all is specified
         // fallback to backend preference
         if (devices[0] != "all" && devices.size() >= 1) {
             if (isInitiator()) {
                 backend_params["device_list"] = devices[rank];
-                if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX_MO)) {
-                    backend_params["num_ucx_engines"] = xferBenchConfig::num_initiator_dev;
-                }
             } else {
                 backend_params["device_list"] = devices[rank - xferBenchConfig::num_initiator_dev];
-                if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX_MO)) {
-                    backend_params["num_ucx_engines"] = xferBenchConfig::num_target_dev;
-                }
             }
         }
 
@@ -137,23 +127,6 @@ xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv, std::vector<st
         std::cout << "Init nixl worker, dev " << (("all" == devices[0]) ? "all" : backend_params["device_list"])
                   << " rank " << rank << ", type " << name << ", hostname "
                   << hostname << std::endl;
-    } else if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_GDS)) {
-        // Using default param values for GDS backend
-        std::cout << "GDS backend" << std::endl;
-        backend_params["batch_pool_size"] = std::to_string(xferBenchConfig::gds_batch_pool_size);
-        backend_params["batch_limit"] = std::to_string(xferBenchConfig::gds_batch_limit);
-        std::cout << "GDS batch pool size: " << xferBenchConfig::gds_batch_pool_size << std::endl;
-        std::cout << "GDS batch limit: " << xferBenchConfig::gds_batch_limit << std::endl;
-    } else if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_POSIX)) {
-        // Set API type parameter for POSIX backend
-        if (xferBenchConfig::posix_api_type == XFERBENCH_POSIX_API_AIO) {
-            backend_params["use_aio"] = true;
-            backend_params["use_uring"] = false;
-        } else if (xferBenchConfig::posix_api_type == XFERBENCH_POSIX_API_URING) {
-            backend_params["use_aio"] = false;
-            backend_params["use_uring"] = true;
-        }
-        std::cout << "POSIX backend with API type: " << xferBenchConfig::posix_api_type << std::endl;
     } else {
         std::cerr << "Unsupported backend: " << xferBenchConfig::backend << std::endl;
         exit(EXIT_FAILURE);
@@ -228,7 +201,7 @@ static std::optional<xferBenchIOV> getVramDesc(int devid, size_t buffer_size,
     void *addr;
 
     CHECK_CUDA_ERROR(cudaSetDevice(devid), "Failed to set device");
-#if !USE_VMM
+
     CHECK_CUDA_ERROR(cudaMalloc(&addr, buffer_size), "Failed to allocate CUDA buffer");
     if (isInit) {
         CHECK_CUDA_ERROR(cudaMemset(addr, XFERBENCH_INITIATOR_BUFFER_ELEMENT, buffer_size), "Failed to set device");
@@ -236,56 +209,6 @@ static std::optional<xferBenchIOV> getVramDesc(int devid, size_t buffer_size,
     } else {
         CHECK_CUDA_ERROR(cudaMemset(addr, XFERBENCH_TARGET_BUFFER_ELEMENT, buffer_size), "Failed to set device");
     }
-#else
-    CUdeviceptr addr = 0;
-    size_t granularity = 0;
-    CUmemAllocationProp prop = {};
-    CUmemAccessDesc access = {};
-
-    prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-    // prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
-    prop.allocFlags.gpuDirectRDMACapable = 1;
-    prop.location.id = devid;
-    prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    // prop.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
-
-    // Get the allocation granularity
-    CHECK_CUDA_DRIVER_ERROR(cuMemGetAllocationGranularity(&granularity,
-                         &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM),
-                         "Failed to get allocation granularity");
-    std::cout << "Granularity: " << granularity << std::endl;
-
-    padded_size = ROUND_UP(buffer_size, granularity);
-    CHECK_CUDA_DRIVER_ERROR(cuMemCreate(&handle, padded_size, &prop, 0),
-                         "Failed to create allocation");
-
-    // Reserve the memory address
-    CHECK_CUDA_DRIVER_ERROR(cuMemAddressReserve(&addr, padded_size,
-                         granularity, 0, 0), "Failed to reserve address");
-
-    // Map the memory
-    CHECK_CUDA_DRIVER_ERROR(cuMemMap(addr, padded_size, 0, handle, 0),
-                         "Failed to map memory");
-
-    std::cout << "Address: " << std::hex << std::showbase << addr
-              << " Buffer size: " << std::dec << buffer_size
-              << " Padded size: " << std::dec << padded_size << std::endl;
-    // Set the memory access rights
-    access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    access.location.id = devid;
-    access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    CHECK_CUDA_DRIVER_ERROR(cuMemSetAccess(addr, buffer_size, &access, 1),
-        "Failed to set access");
-
-    // Set memory content based on role
-    if (isInit) {
-        CHECK_CUDA_DRIVER_ERROR(cuMemsetD8(addr, XFERBENCH_INITIATOR_BUFFER_ELEMENT, buffer_size),
-            "Failed to set device memory to XFERBENCH_INITIATOR_BUFFER_ELEMENT");
-    } else {
-        CHECK_CUDA_DRIVER_ERROR(cuMemsetD8(addr, XFERBENCH_TARGET_BUFFER_ELEMENT, buffer_size),
-            "Failed to set device memory to XFERBENCH_TARGET_BUFFER_ELEMENT");
-    }
-#endif /* !USE_VMM */
 
     return std::optional<xferBenchIOV>(std::in_place, (uintptr_t)addr, buffer_size, devid);
 }
@@ -306,44 +229,6 @@ std::optional<xferBenchIOV> xferBenchNixlWorker::initBasicDescVram(size_t buffer
     return getVramDesc(mem_dev_id, buffer_size, isInitiator());
 }
 #endif /* HAVE_CUDA */
-
-static std::vector<int> createFileFds(std::string name, bool is_gds) {
-    std::vector<int> fds;
-    int flags = O_RDWR | O_CREAT;
-    int num_files = xferBenchConfig::num_files;
-    std::string file_path, file_name_prefix;
-
-    if (xferBenchConfig::storage_enable_direct) {
-        flags |= O_DIRECT;
-    }
-    if (is_gds) {
-        file_path = xferBenchConfig::gds_filepath != "" ?
-                    xferBenchConfig::gds_filepath :
-                    std::filesystem::current_path().string();
-        file_name_prefix = "/nixlbench_gds_test_file_";
-    } else {  // POSIX
-        file_path = xferBenchConfig::posix_filepath != "" ?
-                    xferBenchConfig::posix_filepath :
-                    std::filesystem::current_path().string();
-        file_name_prefix = "/nixlbench_posix_test_file_";
-    }
-
-    for (int i = 0; i < num_files; i++) {
-        std::string file_name = file_path + file_name_prefix + name + "_" + std::to_string(i);
-        std::cout << "Creating " << (is_gds ? "GDS" : "POSIX") << " file: " << file_name << std::endl;
-        int fd = open(file_name.c_str(), flags, 0744);
-        if (fd < 0) {
-            std::cerr << "Failed to open file: " << file_name << " with error: "
-                      << strerror(errno) << std::endl;
-            for (int j = 0; j < i; j++) {
-                close(fds[j]);
-            }
-            return {};
-        }
-        fds.push_back(fd);
-    }
-    return fds;
-}
 
 std::optional<xferBenchIOV> xferBenchNixlWorker::initBasicDescFile(size_t buffer_size, int fd, int mem_dev_id) {
     auto ret = std::optional<xferBenchIOV>(std::in_place, (uintptr_t)gds_running_ptr, buffer_size, fd);
@@ -406,33 +291,6 @@ std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory(int n
 
     opt_args.backends.push_back(backend_engine);
 
-    if (XFERBENCH_BACKEND_GDS == xferBenchConfig::backend ||
-        XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend) {
-        bool is_gds = XFERBENCH_BACKEND_GDS == xferBenchConfig::backend;
-        remote_fds = createFileFds(getName(), is_gds);
-        if (remote_fds.empty()) {
-            std::cerr << "Failed to create " << ((is_gds) ? "GDS" : "POSIX") << " file" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-        for (int list_idx = 0; list_idx < num_lists; list_idx++) {
-            std::vector<xferBenchIOV> iov_list;
-            for (i = 0; i < num_devices; i++) {
-                std::optional<xferBenchIOV> basic_desc;
-                basic_desc = initBasicDescFile(buffer_size, remote_fds[0], i);
-                if (basic_desc) {
-                    iov_list.push_back(basic_desc.value());
-                }
-            }
-            nixl_reg_dlist_t desc_list(FILE_SEG);
-            iovListToNixlRegDlist(iov_list, desc_list);
-            CHECK_NIXL_ERROR(agent->registerMem(desc_list, &opt_args),
-                        "registerMem failed");
-            remote_iovs.push_back(iov_list);
-        }
-        // Reset the running pointer to 0
-        gds_running_ptr = 0x0;
-    }
-
     for (int list_idx = 0; list_idx < num_lists; list_idx++) {
         std::vector<xferBenchIOV> iov_list;
         for (i = 0; i < num_devices; i++) {
@@ -494,27 +352,10 @@ void xferBenchNixlWorker::deallocateMemory(std::vector<std::vector<xferBenchIOV>
                          "deregisterMem failed");
     }
 
-    if (XFERBENCH_BACKEND_GDS == xferBenchConfig::backend ||
-        XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend) {
-        for (auto &iov_list: remote_iovs) {
-            for (auto &iov: iov_list) {
-                cleanupBasicDescFile(iov);
-            }
-            nixl_reg_dlist_t desc_list(FILE_SEG);
-            iovListToNixlRegDlist(iov_list, desc_list);
-            CHECK_NIXL_ERROR(agent->deregisterMem(desc_list, &opt_args),
-                             "deregisterMem failed");
-        }
-    }
 }
 
 int xferBenchNixlWorker::exchangeMetadata() {
     int meta_sz, ret = 0;
-
-    if (XFERBENCH_BACKEND_GDS == xferBenchConfig::backend ||
-        XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend) {
-        return 0;
-    }
 
     if (isTarget()) {
         std::string local_metadata;
@@ -566,66 +407,50 @@ xferBenchNixlWorker::exchangeIOV(const std::vector<std::vector<xferBenchIOV>> &l
     std::vector<std::vector<xferBenchIOV>> res;
     int desc_str_sz;
 
-    // Special case for GDS
-    if (XFERBENCH_BACKEND_GDS == xferBenchConfig::backend ||
-        XFERBENCH_BACKEND_POSIX == xferBenchConfig::backend) {
-        for (auto &iov_list: local_iovs) {
-            std::vector<xferBenchIOV> remote_iov_list;
-            for (auto &iov: iov_list) {
-                std::optional<xferBenchIOV> basic_desc;
-                basic_desc = initBasicDescFile(iov.len, remote_fds[0], iov.devId);
-                if (basic_desc) {
-                    remote_iov_list.push_back(basic_desc.value());
-                }
+    for (const auto &local_iov: local_iovs) {
+        nixlSerDes ser_des;
+        nixl_xfer_dlist_t local_desc(seg_type);
+
+        iovListToNixlXferDlist(local_iov, local_desc);
+
+        if (isTarget()) {
+            const char *buffer;
+            int destrank;
+
+            local_desc.serialize(&ser_des);
+            std::string desc_str = ser_des.exportStr();
+            buffer = desc_str.data();
+            desc_str_sz = desc_str.size();
+
+            if (IS_PAIRWISE_AND_SG()) {
+                destrank = rt->getRank() - xferBenchConfig::num_target_dev;
+                //XXX: Fix up the rank, depends on processes distributed on hosts
+                //assumes placement is adjacent ranks to same node
+            } else {
+                destrank = 0;
             }
-            res.push_back(remote_iov_list);
-        }
-    } else {
-        for (const auto &local_iov: local_iovs) {
-            nixlSerDes ser_des;
-            nixl_xfer_dlist_t local_desc(seg_type);
+            rt->sendInt(&desc_str_sz, destrank);
+            rt->sendChar((char *)buffer, desc_str_sz, destrank);
+        } else if (isInitiator()) {
+            char *buffer;
+            int srcrank;
 
-            iovListToNixlXferDlist(local_iov, local_desc);
-
-            if (isTarget()) {
-                const char *buffer;
-                int destrank;
-
-                local_desc.serialize(&ser_des);
-                std::string desc_str = ser_des.exportStr();
-                buffer = desc_str.data();
-                desc_str_sz = desc_str.size();
-
-                if (IS_PAIRWISE_AND_SG()) {
-                    destrank = rt->getRank() - xferBenchConfig::num_target_dev;
-                    //XXX: Fix up the rank, depends on processes distributed on hosts
-                    //assumes placement is adjacent ranks to same node
-                } else {
-                    destrank = 0;
-                }
-                rt->sendInt(&desc_str_sz, destrank);
-                rt->sendChar((char *)buffer, desc_str_sz, destrank);
-            } else if (isInitiator()) {
-                char *buffer;
-                int srcrank;
-
-                if (IS_PAIRWISE_AND_SG()) {
-                    srcrank = rt->getRank() + xferBenchConfig::num_initiator_dev;
-                    //XXX: Fix up the rank, depends on processes distributed on hosts
-                    //assumes placement is adjacent ranks to same node
-                } else {
-                    srcrank = 1;
-                }
-                rt->recvInt(&desc_str_sz, srcrank);
-                buffer = (char *)calloc(desc_str_sz, sizeof(*buffer));
-                rt->recvChar((char *)buffer, desc_str_sz, srcrank);
-
-                std::string desc_str(buffer, desc_str_sz);
-                ser_des.importStr(desc_str);
-
-                nixl_xfer_dlist_t remote_desc(&ser_des);
-                res.emplace_back(nixlXferDlistToIOVList(remote_desc));
+            if (IS_PAIRWISE_AND_SG()) {
+                srcrank = rt->getRank() + xferBenchConfig::num_initiator_dev;
+                //XXX: Fix up the rank, depends on processes distributed on hosts
+                //assumes placement is adjacent ranks to same node
+            } else {
+                srcrank = 1;
             }
+            rt->recvInt(&desc_str_sz, srcrank);
+            buffer = (char *)calloc(desc_str_sz, sizeof(*buffer));
+            rt->recvChar((char *)buffer, desc_str_sz, srcrank);
+
+            std::string desc_str(buffer, desc_str_sz);
+            ser_des.importStr(desc_str);
+
+            nixl_xfer_dlist_t remote_desc(&ser_des);
+            res.emplace_back(nixlXferDlistToIOVList(remote_desc));
         }
     }
     // Ensure all processes have completed the exchange with a barrier/sync

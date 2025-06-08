@@ -21,11 +21,6 @@
 #include <iostream>
 #include <string>
 
-class xferBenchRTReq {
-    public:
-        friend class xferBenchRT;
-};
-
 class xferBenchRT {
     private:
         int size;

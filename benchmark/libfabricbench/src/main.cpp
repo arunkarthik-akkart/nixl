@@ -151,27 +151,17 @@ static int processBatchSizes(xferBenchWorker &worker,
 }
 
 static std::unique_ptr<xferBenchWorker> createWorker(int *argc, char ***argv) {
-    if (xferBenchConfig::worker_type == "nixl") {
-        std::vector<std::string> devices = xferBenchConfig::parseDeviceList();
-        if (devices.empty()) {
-            std::cerr << "Failed to parse device list" << std::endl;
-            return nullptr;
-        }
-        return std::make_unique<xferBenchNixlWorker>(argc, argv, devices);
-    } else if (xferBenchConfig::worker_type == "nvshmem") {
-#if HAVE_NVSHMEM && HAVE_CUDA
-        return std::make_unique<xferBenchNvshmemWorker>(argc, argv);
-#else
-        std::cerr << "NVSHMEM worker requested but NVSHMEM or CUDA is not available" << std::endl;
-        return nullptr;
-#endif
-    } else {
-        std::cerr << "Unsupported worker type: " << xferBenchConfig::worker_type << std::endl;
+    std::vector<std::string> devices = xferBenchConfig::parseDeviceList();
+    if (devices.empty()) {
+        std::cerr << "Failed to parse device list" << std::endl;
         return nullptr;
     }
+    return std::make_unique<xferBenchNixlWorker>(argc, argv, devices);
 }
 
 int main(int argc, char *argv[]) {
+
+    // Parse Command Line flags
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     int ret = xferBenchConfig::loadFromFlags();
