@@ -41,30 +41,14 @@
 // Backend types
 #define XFERBENCH_BACKEND_UCX "UCX"
 
-// Scheme types for transfer patterns
-#define XFERBENCH_SCHEME_PAIRWISE     "pairwise"
-#define XFERBENCH_SCHEME_ONE_TO_MANY  "onetomany"
-#define XFERBENCH_SCHEME_MANY_TO_ONE  "manytoone"
-#define XFERBENCH_SCHEME_TP           "tp"
-
 // Operation types
 #define XFERBENCH_OP_READ  "READ"
 #define XFERBENCH_OP_WRITE "WRITE"
 
-// Mode types
-#define XFERBENCH_MODE_SG  "SG"
-#define XFERBENCH_MODE_MG  "MG"
-
-#define IS_PAIRWISE_AND_SG() (XFERBENCH_SCHEME_PAIRWISE == xferBenchConfig::scheme && \
-                              XFERBENCH_MODE_SG == xferBenchConfig::mode)
-#define IS_PAIRWISE_AND_MG() (XFERBENCH_SCHEME_PAIRWISE == xferBenchConfig::scheme && \
-                              XFERBENCH_MODE_MG == xferBenchConfig::mode)
 class xferBenchConfig {
     public:
         static std::string worker_type;
         static std::string backend;
-        static std::string scheme;
-        static std::string mode;
         static std::string op_type;
         static size_t total_buffer_size;
         static int num_initiator_dev;

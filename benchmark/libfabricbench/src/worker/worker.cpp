@@ -23,10 +23,6 @@
 
 static xferBenchRT *createRT(int *terminate) {
     int total = 2;
-    if (XFERBENCH_MODE_SG == xferBenchConfig::mode) {
-        total = xferBenchConfig::num_initiator_dev +
-            xferBenchConfig::num_target_dev;
-    }
     return new xferBenchEtcdRT(xferBenchConfig::etcd_endpoints, total, terminate);
 
     exit(EXIT_FAILURE);
@@ -46,19 +42,10 @@ xferBenchWorker::xferBenchWorker(int *argc, char ***argv) {
     }
 
     int rank = rt->getRank();
-
-    if (XFERBENCH_MODE_SG == xferBenchConfig::mode) {
-        if (rank >= 0 && rank < xferBenchConfig::num_initiator_dev) {
-            name = "initiator";
-        } else {
-            name = "target";
-        }
-    } else if (XFERBENCH_MODE_MG == xferBenchConfig::mode) {
-        if (0 == rank) {
-            name = "initiator";
-        } else {
-            name = "target";
-        }
+    if (0 == rank) {
+        name = "initiator";
+    } else {
+        name = "target";
     }
 
     // Set the RT for utils

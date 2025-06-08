@@ -29,37 +29,15 @@
 #include <csignal>
 
 static std::pair<size_t, size_t> getStrideScheme(xferBenchWorker &worker, int num_threads) {
-    int initiator_device, target_device;
+    int initiator_device;
     size_t buffer_size, count, stride;
 
     initiator_device = xferBenchConfig::num_initiator_dev;
-    target_device = xferBenchConfig::num_target_dev;
 
     // Default value
     count = 1;
     buffer_size = xferBenchConfig::total_buffer_size / (initiator_device * num_threads);
 
-    // TODO: add macro for schemes
-    // Maybe, we can squeze ONE_TO_MANY and MANY_TO_ONE into TP scheme
-    if (XFERBENCH_SCHEME_ONE_TO_MANY == xferBenchConfig::scheme) {
-        if (worker.isInitiator()) {
-            count = target_device;
-        }
-    } else if (XFERBENCH_SCHEME_MANY_TO_ONE == xferBenchConfig::scheme) {
-        if (worker.isTarget()) {
-            count = initiator_device;
-        }
-    } else if (XFERBENCH_SCHEME_TP == xferBenchConfig::scheme) {
-        if (worker.isInitiator()) {
-            if (initiator_device < target_device) {
-                count = target_device / initiator_device;
-            }
-        } else if (worker.isTarget()) {
-            if (target_device < initiator_device) {
-                count = initiator_device / target_device;
-            }
-        }
-    }
     stride = buffer_size / count;
 
     return std::make_pair(count, stride);
@@ -110,11 +88,6 @@ static int processBatchSizes(xferBenchWorker &worker,
         worker.exchangeIOV(local_trans_lists);
         worker.poll(block_size);
 
-        if (IS_PAIRWISE_AND_SG()) {
-            // TODO: This is here just to call throughput reduction
-            // Separate reduction and print
-            xferBenchUtils::printStats(true, block_size, batch_size, 0);
-        }
     } else if (worker.isInitiator()) {
         std::vector<std::vector<xferBenchIOV>> remote_trans_lists(worker.exchangeIOV(local_trans_lists));
 

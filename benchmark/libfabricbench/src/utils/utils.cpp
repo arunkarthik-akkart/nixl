@@ -36,8 +36,6 @@
  **********/
 DEFINE_string(backend, XFERBENCH_BACKEND_UCX, "Name of communication backend [UCX, UCX_MO, GDS, POSIX] \
               (only used with nixl worker)");
-DEFINE_string(scheme, XFERBENCH_SCHEME_PAIRWISE, "Scheme: pairwise, maytoone, onetomany, tp");
-DEFINE_string(mode, XFERBENCH_MODE_SG, "MODE: SG (Single GPU per proc), MG (Multi GPU per proc) [default: SG]");
 DEFINE_string(op_type, XFERBENCH_OP_WRITE, "Op type: READ, WRITE");
 DEFINE_uint64(total_buffer_size, 8LL * 1024 * (1 << 20), "Total buffer \
               size across device for each process (Default: 80 GiB)");
@@ -57,8 +55,6 @@ DEFINE_string(device_list, "all", "Comma-separated device name to use for \
 DEFINE_string(etcd_endpoints, "http://localhost:2379", "ETCD server endpoints for communication");
 
 std::string xferBenchConfig::backend = "";
-std::string xferBenchConfig::scheme = "";
-std::string xferBenchConfig::mode = "";
 std::string xferBenchConfig::op_type = "";
 size_t xferBenchConfig::total_buffer_size = 0;
 int xferBenchConfig::num_initiator_dev = 0;
@@ -73,8 +69,6 @@ int xferBenchConfig::loadFromFlags() {
     backend = FLAGS_backend;
     enable_pt = FLAGS_enable_pt;
     device_list = FLAGS_device_list;
-    scheme = FLAGS_scheme;
-    mode = FLAGS_mode;
     op_type = FLAGS_op_type;
     total_buffer_size = FLAGS_total_buffer_size;
     num_initiator_dev = FLAGS_num_initiator_dev;
@@ -96,10 +90,6 @@ void xferBenchConfig::printConfig() {
                 << enable_pt << std::endl;
     std::cout << std::left << std::setw(60) << "Device list (--device_list=dev1,dev2,...)" << ": "
                 << device_list << std::endl;
-    std::cout << std::left << std::setw(60) << "Scheme (--scheme=[pairwise,manytoone,onetomany,tp])" << ": "
-              << scheme << std::endl;
-    std::cout << std::left << std::setw(60) << "Mode (--mode=[SG,MG])" << ": "
-              << mode << std::endl;
     std::cout << std::left << std::setw(60) << "Op type (--op_type=[READ,WRITE])" << ": "
               << op_type << std::endl;
     std::cout << std::left << std::setw(60) << "Total buffer size (--total_buffer_size=N)" << ": "
@@ -116,24 +106,7 @@ std::vector<std::string> xferBenchConfig::parseDeviceList() {
     std::vector<std::string> devices;
     std::string dev;
     std::stringstream ss(xferBenchConfig::device_list);
-
-    // TODO: Add support for other schemes
-    if (xferBenchConfig::scheme == XFERBENCH_SCHEME_PAIRWISE &&
-        xferBenchConfig::device_list != "all") {
-	    while (std::getline(ss, dev, ',')) {
-            devices.push_back(dev);
-	    }
-
-	    if ((int)devices.size() != xferBenchConfig::num_initiator_dev ||
-            (int)devices.size() != xferBenchConfig::num_target_dev) {
-	    	std::cerr << "Incorrect device list " << xferBenchConfig::device_list
-                      << " provided for pairwise scheme " << devices.size()
-                      << "# devices" << std::endl;
-	    	return {};
-	    }
-    } else {
-        devices.push_back("all");
-    }
+    devices.push_back("all");
 
     return devices;
 }
@@ -157,46 +130,22 @@ std::string xferBenchUtils::getDevToUse() {
 }
 
 void xferBenchUtils::printStatsHeader() {
-    if (IS_PAIRWISE_AND_SG() && rt->getSize() > 2) {
-        std::cout << std::left << std::setw(20) << "Block Size (B)"
-                  << std::setw(15) << "Batch Size"
-                  << std::setw(15) << "Avg Lat. (us)"
-                  << std::setw(15) << "B/W (MiB/Sec)"
-                  << std::setw(15) << "B/W (GiB/Sec)"
-                  << std::setw(15) << "B/W (GB/Sec)"
-                  << std::setw(25) << "Aggregate B/W (GB/Sec)"
-                  << std::setw(20) << "Network Util (%)"
-                  << std::endl;
-    } else {
-        std::cout << std::left << std::setw(20) << "Block Size (B)"
-                  << std::setw(15) << "Batch Size"
-                  << std::setw(15) << "Avg Lat. (us)"
-                  << std::setw(15) << "B/W (MiB/Sec)"
-                  << std::setw(15) << "B/W (GiB/Sec)"
-                  << std::setw(15) << "B/W (GB/Sec)"
-                  << std::endl;
-    }
+    std::cout << std::left << std::setw(20) << "Block Size (B)"
+                << std::setw(15) << "Batch Size"
+                << std::setw(15) << "Avg Lat. (us)"
+                << std::setw(15) << "B/W (MiB/Sec)"
+                << std::setw(15) << "B/W (GiB/Sec)"
+                << std::setw(15) << "B/W (GB/Sec)"
+                << std::endl;
     std::cout << std::string(80, '-') << std::endl;
 }
 
 void xferBenchUtils::printStats(bool is_target, size_t block_size, size_t batch_size, double total_duration) {
     size_t total_data_transferred = 0;
     double avg_latency = 0, throughput = 0, throughput_gib = 0, throughput_gb = 0;
-    double totalbw = 0;
-
-    // TODO: We can avoid this by creating a sub-communicator across initiator ranks
-    // if (isTarget() && IS_PAIRWISE_AND_SG() && rt->getSize() > 2) { - Fix this isTarget can not be called here
-    if (is_target && IS_PAIRWISE_AND_SG() && rt->getSize() > 2) {
-        rt->reduceSumDouble(&throughput_gb, &totalbw, 0);
-        return;
-    }
 
     total_data_transferred = ((block_size * batch_size) * 1); // In Bytes
     avg_latency = (total_duration / (1 * batch_size)); // In microsec
-    if (IS_PAIRWISE_AND_MG()) {
-        total_data_transferred *= xferBenchConfig::num_initiator_dev; // In Bytes
-        avg_latency /= xferBenchConfig::num_initiator_dev; // In microsec
-    }
 
     throughput = (((double) total_data_transferred / (1024 * 1024)) /
                    (total_duration / 1e6));   // In MiB/Sec
@@ -204,34 +153,16 @@ void xferBenchUtils::printStats(bool is_target, size_t block_size, size_t batch_
     throughput_gb = (((double) total_data_transferred / (1000 * 1000 * 1000)) /
                    (total_duration / 1e6));   // In GB/Sec
 
-    if (IS_PAIRWISE_AND_SG() && rt->getSize() > 2) {
-        rt->reduceSumDouble(&throughput_gb, &totalbw, 0);
-    } else {
-        totalbw = throughput_gb;
-    }
-
-    if (IS_PAIRWISE_AND_SG() && rt->getRank() != 0) {
+    if (rt->getRank() != 0) {
         return;
     }
 
     // Tabulate print with fixed width for each string
-    if (IS_PAIRWISE_AND_SG() && rt->getSize() > 2) {
-        std::cout << std::left << std::setw(20) << block_size
-                  << std::setw(15) << batch_size
-                  << std::setw(15) << avg_latency
-                  << std::setw(15) << throughput
-                  << std::setw(15) << throughput_gib
-                  << std::setw(15) << throughput_gb
-                  << std::setw(25) << totalbw
-                  << std::setw(20) << (totalbw / (rt->getSize()/2 * MAXBW))*100
-                  << std::endl;
-    } else {
-        std::cout << std::left << std::setw(20) << block_size
-                  << std::setw(15) << batch_size
-                  << std::setw(15) << avg_latency
-                  << std::setw(15) << throughput
-                  << std::setw(15) << throughput_gib
-                  << std::setw(15) << throughput_gb
-                  << std::endl;
-    }
+    std::cout << std::left << std::setw(20) << block_size
+                << std::setw(15) << batch_size
+                << std::setw(15) << avg_latency
+                << std::setw(15) << throughput
+                << std::setw(15) << throughput_gib
+                << std::setw(15) << throughput_gb
+                << std::endl;
 }

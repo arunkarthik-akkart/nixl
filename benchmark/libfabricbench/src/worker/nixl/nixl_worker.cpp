@@ -242,27 +242,17 @@ int xferBenchNixlWorker::exchangeMetadata() {
         buffer = local_metadata.data();
         meta_sz = local_metadata.size();
 
-        if (IS_PAIRWISE_AND_SG()) {
-            destrank = rt->getRank() - xferBenchConfig::num_target_dev;
-            //XXX: Fix up the rank, depends on processes distributed on hosts
-            //assumes placement is adjacent ranks to same node
-        } else {
-            destrank = 0;
-        }
+
+        destrank = 0;
+
         rt->sendInt(&meta_sz, destrank);
         rt->sendChar((char *)buffer, meta_sz, destrank);
     } else if (isInitiator()) {
         char * buffer;
         std::string remote_agent;
         int srcrank;
+        srcrank = 1;
 
-        if (IS_PAIRWISE_AND_SG()) {
-            srcrank = rt->getRank() + xferBenchConfig::num_initiator_dev;
-            //XXX: Fix up the rank, depends on processes distributed on hosts
-            //assumes placement is adjacent ranks to same node
-        } else {
-            srcrank = 1;
-        }
         rt->recvInt(&meta_sz, srcrank);
         buffer = (char *)calloc(meta_sz, sizeof(*buffer));
         rt->recvChar((char *)buffer, meta_sz, srcrank);
@@ -297,26 +287,17 @@ xferBenchNixlWorker::exchangeIOV(const std::vector<std::vector<xferBenchIOV>> &l
             buffer = desc_str.data();
             desc_str_sz = desc_str.size();
 
-            if (IS_PAIRWISE_AND_SG()) {
-                destrank = rt->getRank() - xferBenchConfig::num_target_dev;
-                //XXX: Fix up the rank, depends on processes distributed on hosts
-                //assumes placement is adjacent ranks to same node
-            } else {
-                destrank = 0;
-            }
+
+            destrank = 0;
+
             rt->sendInt(&desc_str_sz, destrank);
             rt->sendChar((char *)buffer, desc_str_sz, destrank);
         } else if (isInitiator()) {
             char *buffer;
             int srcrank;
 
-            if (IS_PAIRWISE_AND_SG()) {
-                srcrank = rt->getRank() + xferBenchConfig::num_initiator_dev;
-                //XXX: Fix up the rank, depends on processes distributed on hosts
-                //assumes placement is adjacent ranks to same node
-            } else {
-                srcrank = 1;
-            }
+            srcrank = 1;
+
             rt->recvInt(&desc_str_sz, srcrank);
             buffer = (char *)calloc(desc_str_sz, sizeof(*buffer));
             rt->recvChar((char *)buffer, desc_str_sz, srcrank);
@@ -440,15 +421,9 @@ void xferBenchNixlWorker::poll(size_t block_size) {
 }
 
 int xferBenchNixlWorker::synchronizeStart() {
-    if (IS_PAIRWISE_AND_SG()) {
-    	std::cout << "Waiting for all processes to start... (expecting "
-    	          << rt->getSize() << " total: "
-		  << xferBenchConfig::num_initiator_dev << " initiators and "
-    	          << xferBenchConfig::num_target_dev << " targets)" << std::endl;
-    } else {
-    	std::cout << "Waiting for all processes to start... (expecting "
-    	          << rt->getSize() << " total" << std::endl;
-    }
+    
+    std::cout << "Waiting for all processes to start... (expecting "
+                << rt->getSize() << " total" << std::endl;
     if (rt) {
         int ret = rt->barrier("start_barrier");
         if (ret != 0) {
