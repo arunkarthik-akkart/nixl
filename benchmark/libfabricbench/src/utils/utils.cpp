@@ -43,8 +43,6 @@ DEFINE_int32(num_threads, 1,
              "Number of threads used by benchmark."
              " Num_iter must be greater or equal than num_threads and equally divisible by num_threads."
              " (Default: 1)");
-DEFINE_int32(num_initiator_dev, 1, "Number of device in initiator process");
-DEFINE_int32(num_target_dev, 1, "Number of device in target process");
 DEFINE_bool(enable_pt, false, "Enable Progress Thread (only used with nixl worker)");
 
 // TODO: We should take rank wise device list as input to extend support
@@ -57,8 +55,6 @@ DEFINE_string(etcd_endpoints, "http://localhost:2379", "ETCD server endpoints fo
 std::string xferBenchConfig::backend = "";
 std::string xferBenchConfig::op_type = "";
 size_t xferBenchConfig::total_buffer_size = 0;
-int xferBenchConfig::num_initiator_dev = 0;
-int xferBenchConfig::num_target_dev = 0;
 int xferBenchConfig::num_threads = 0;
 bool xferBenchConfig::enable_pt = false;
 std::string xferBenchConfig::device_list = "";
@@ -71,8 +67,6 @@ int xferBenchConfig::loadFromFlags() {
     device_list = FLAGS_device_list;
     op_type = FLAGS_op_type;
     total_buffer_size = FLAGS_total_buffer_size;
-    num_initiator_dev = FLAGS_num_initiator_dev;
-    num_target_dev = FLAGS_num_target_dev;
     num_threads = FLAGS_num_threads;
     etcd_endpoints = FLAGS_etcd_endpoints;
 
@@ -94,10 +88,6 @@ void xferBenchConfig::printConfig() {
               << op_type << std::endl;
     std::cout << std::left << std::setw(60) << "Total buffer size (--total_buffer_size=N)" << ": "
               << total_buffer_size << std::endl;
-    std::cout << std::left << std::setw(60) << "Num initiator dev (--num_initiator_dev=N)" << ": "
-              << num_initiator_dev << std::endl;
-    std::cout << std::left << std::setw(60) << "Num target dev (--num_target_dev=N)" << ": "
-              << num_target_dev << std::endl;
     std::cout << std::string(80, '-') << std::endl;
     std::cout << std::endl;
 }

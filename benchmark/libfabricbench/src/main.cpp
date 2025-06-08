@@ -28,27 +28,15 @@
 #include <memory>
 #include <csignal>
 
-static std::pair<size_t, size_t> getStrideScheme(xferBenchWorker &worker, int num_threads) {
-    int initiator_device;
-    size_t buffer_size, count, stride;
-
-    initiator_device = xferBenchConfig::num_initiator_dev;
-
-    // Default value
-    count = 1;
-    buffer_size = xferBenchConfig::total_buffer_size / (initiator_device * num_threads);
-
-    stride = buffer_size / count;
-
-    return std::make_pair(count, stride);
-}
-
 static std::vector<std::vector<xferBenchIOV>> createTransferDescLists(xferBenchWorker &worker,
                                                                       std::vector<std::vector<xferBenchIOV>> &iov_lists,
                                                                       size_t block_size,
                                                                       size_t batch_size,
                                                                       int num_threads) {
-    auto [count, stride] = getStrideScheme(worker, num_threads);
+
+    size_t count = 1;
+    size_t stride = xferBenchConfig::total_buffer_size / (num_threads);
+
     std::vector<std::vector<xferBenchIOV>> xfer_lists;
 
     for (const auto &iov_list: iov_lists) {

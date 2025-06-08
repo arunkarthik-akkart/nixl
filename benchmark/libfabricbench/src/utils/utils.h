@@ -51,8 +51,6 @@ class xferBenchConfig {
         static std::string backend;
         static std::string op_type;
         static size_t total_buffer_size;
-        static int num_initiator_dev;
-        static int num_target_dev;
         static int num_threads;
         static bool enable_pt;
         static std::string device_list;

@@ -73,16 +73,6 @@ xferBenchNixlWorker::xferBenchNixlWorker(int *argc, char ***argv, std::vector<st
     agent->getPluginParams(backend_name, mems, backend_params);
 
     if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_UCX)){
-        // No need to set device_list if all is specified
-        // fallback to backend preference
-        if (devices[0] != "all" && devices.size() >= 1) {
-            if (isInitiator()) {
-                backend_params["device_list"] = devices[rank];
-            } else {
-                backend_params["device_list"] = devices[rank - xferBenchConfig::num_initiator_dev];
-            }
-        }
-
         if (gethostname(hostname, 256)) {
            std::cerr << "Failed to get hostname" << std::endl;
            exit(EXIT_FAILURE);
@@ -164,35 +154,29 @@ void xferBenchNixlWorker::cleanupBasicDescDram(xferBenchIOV &iov) {
 
 std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory(int num_lists) {
     std::vector<std::vector<xferBenchIOV>> iov_lists;
-    size_t i, buffer_size, num_devices = 0;
+    size_t buffer_size;
     nixl_opt_args_t opt_args;
 
-    if (isInitiator()) {
-        num_devices = xferBenchConfig::num_initiator_dev;
-    } else if (isTarget()) {
-        num_devices = xferBenchConfig::num_target_dev;
-    }
-    buffer_size = xferBenchConfig::total_buffer_size / (num_devices * num_lists);
+    buffer_size = xferBenchConfig::total_buffer_size / (num_lists);
 
     opt_args.backends.push_back(backend_engine);
 
     for (int list_idx = 0; list_idx < num_lists; list_idx++) {
         std::vector<xferBenchIOV> iov_list;
-        for (i = 0; i < num_devices; i++) {
-            std::optional<xferBenchIOV> basic_desc;
 
-            switch (seg_type) {
-            case DRAM_SEG:
-                basic_desc = initBasicDescDram(buffer_size, i);
-                break;
-            default:
-                std::cerr << "Unsupported mem type: " << seg_type << std::endl;
-                exit(EXIT_FAILURE);
-            }
+        std::optional<xferBenchIOV> basic_desc;
 
-            if (basic_desc) {
-                iov_list.push_back(basic_desc.value());
-            }
+        switch (seg_type) {
+        case DRAM_SEG:
+            basic_desc = initBasicDescDram(buffer_size, 0);
+            break;
+        default:
+            std::cerr << "Unsupported mem type: " << seg_type << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        if (basic_desc) {
+            iov_list.push_back(basic_desc.value());
         }
 
         nixl_reg_dlist_t desc_list(seg_type);
