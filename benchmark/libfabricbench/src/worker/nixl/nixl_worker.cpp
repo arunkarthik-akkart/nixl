@@ -92,36 +92,34 @@ xferBenchNixlWorker::~xferBenchNixlWorker() {
 }
 
 // Convert vector of xferBenchIOV to nixl_reg_dlist_t
-static void iovListToNixlRegDlist(const std::vector<xferBenchIOV> &iov_list,
+static void iovListToNixlRegDlist(const xferBenchIOV &iov,
                                  nixl_reg_dlist_t &dlist) {
     nixlBlobDesc desc;
-    for (const auto &iov : iov_list) {
-        desc.addr = iov.addr;
-        desc.len = iov.len;
-        desc.devId = iov.devId;
-        dlist.addDesc(desc);
-    }
+    desc.addr = iov.addr;
+    desc.len = iov.len;
+    desc.devId = iov.devId;
+    dlist.addDesc(desc);
 }
 
 // Convert nixl_xfer_dlist_t to vector of xferBenchIOV
-static std::vector<xferBenchIOV> nixlXferDlistToIOVList(const nixl_xfer_dlist_t &dlist) {
-    std::vector<xferBenchIOV> iov_list;
+static xferBenchIOV nixlXferDlistToIOVList(const nixl_xfer_dlist_t &dlist) {
+    xferBenchIOV iov(0,0,0);
     for (const auto &desc : dlist) {
-        iov_list.emplace_back(desc.addr, desc.len, desc.devId);
+        iov.addr = desc.addr;
+        iov.devId = desc.devId;
+        iov.len = desc.len;
     }
-    return iov_list;
+    return iov;
 }
 
 // Convert vector of xferBenchIOV to nixl_xfer_dlist_t
-static void iovListToNixlXferDlist(const std::vector<xferBenchIOV> &iov_list,
+static void iovListToNixlXferDlist(const xferBenchIOV &iov,
                                   nixl_xfer_dlist_t &dlist) {
     nixlBasicDesc desc;
-    for (const auto &iov : iov_list) {
-        desc.addr = iov.addr;
-        desc.len = iov.len;
-        desc.devId = iov.devId;
-        dlist.addDesc(desc);
-    }
+    desc.addr = iov.addr;
+    desc.len = iov.len;
+    desc.devId = iov.devId;
+    dlist.addDesc(desc);
 }
 
 std::optional<xferBenchIOV> xferBenchNixlWorker::initBasicDescDram(size_t buffer_size, int mem_dev_id) {
@@ -147,7 +145,7 @@ void xferBenchNixlWorker::cleanupBasicDescDram(xferBenchIOV &iov) {
     free((void *)iov.addr);
 }
 
-std::vector<xferBenchIOV> xferBenchNixlWorker::allocateMemory() {
+xferBenchIOV xferBenchNixlWorker::allocateMemory() {
     size_t buffer_size;
     nixl_opt_args_t opt_args;
 
@@ -155,38 +153,34 @@ std::vector<xferBenchIOV> xferBenchNixlWorker::allocateMemory() {
 
     opt_args.backends.push_back(backend_engine);
 
-    std::vector<xferBenchIOV> iov_list;
+    xferBenchIOV iov(0,0,0);
 
     std::optional<xferBenchIOV> basic_desc;
 
     basic_desc = initBasicDescDram(buffer_size, 0);
 
     if (basic_desc) {
-        iov_list.push_back(basic_desc.value());
+        iov = basic_desc.value();
     }
 
     nixl_reg_dlist_t desc_list(DRAM_SEG);
-    iovListToNixlRegDlist(iov_list, desc_list);
+    iovListToNixlRegDlist(iov, desc_list);
     CHECK_NIXL_ERROR(agent->registerMem(desc_list, &opt_args),
                     "registerMem failed");
-    std::cout << "allocate memory iov size :" << iov_list.size() << std::endl;
 
-    return iov_list;
+    return iov;
 }
 
-void xferBenchNixlWorker::deallocateMemory(std::vector<xferBenchIOV> &iov_list) {
+void xferBenchNixlWorker::deallocateMemory(xferBenchIOV &iov) {
     nixl_opt_args_t opt_args;
 
     opt_args.backends.push_back(backend_engine);
-    for (auto &iov: iov_list) {
-        cleanupBasicDescDram(iov);
-    }
+    cleanupBasicDescDram(iov);
 
     nixl_reg_dlist_t desc_list(DRAM_SEG);
-    iovListToNixlRegDlist(iov_list, desc_list);
+    iovListToNixlRegDlist(iov, desc_list);
     CHECK_NIXL_ERROR(agent->deregisterMem(desc_list, &opt_args),
                         "deregisterMem failed");
-    std::cout << "deallocate memory iov size :" << iov_list.size() << std::endl; 
 }
 
 int xferBenchNixlWorker::exchangeMetadata() {
@@ -227,9 +221,9 @@ int xferBenchNixlWorker::exchangeMetadata() {
     return ret;
 }
 
-std::vector<xferBenchIOV>
-xferBenchNixlWorker::exchangeIOV(const std::vector<xferBenchIOV> &local_iov) {
-    std::vector<xferBenchIOV> res;
+xferBenchIOV
+xferBenchNixlWorker::exchangeIOV(const xferBenchIOV &local_iov) {
+    xferBenchIOV res(0,0,0);
     int desc_str_sz;
 
     nixlSerDes ser_des;
@@ -268,17 +262,14 @@ xferBenchNixlWorker::exchangeIOV(const std::vector<xferBenchIOV> &local_iov) {
         res = nixlXferDlistToIOVList(remote_desc);
     }
 
-    std::cout << "exchange iov list iov size :" << local_iov.size() << std::endl;
-
-    std::cout << "result iov list iov size :" << res.size() << std::endl;
     // Ensure all processes have completed the exchange with a barrier/sync
     synchronize();
     return res;
 }
 
 static int execTransfer(nixlAgent *agent,
-                        const std::vector<xferBenchIOV> &local_iov,
-                        const std::vector<xferBenchIOV> &remote_iov,
+                        const xferBenchIOV &local_iov,
+                        const xferBenchIOV &remote_iov,
                         const nixl_xfer_op_t op)
 {
     int ret = 0;
@@ -330,16 +321,14 @@ static int execTransfer(nixlAgent *agent,
 }
 
 std::variant<double, int> xferBenchNixlWorker::transfer(size_t block_size,
-                                               const std::vector<xferBenchIOV> &local_iov,
-                                               const std::vector<xferBenchIOV> &remote_iov) {
+                                               const xferBenchIOV &local_iov,
+                                               const xferBenchIOV &remote_iov) {
     struct timeval t_start, t_end;
     double total_duration = 0.0;
     int ret = 0;
     nixl_xfer_op_t xfer_op = XFERBENCH_OP_READ == xferBenchConfig::op_type ? NIXL_READ : NIXL_WRITE;
     // int completion_flag = 1;
 
-    std::cout << "transfer iov list iov size :" << local_iov.size() << std::endl;
-    std::cout << "remote iov list iov size :" << remote_iov.size() << std::endl;
     ret = execTransfer(agent, local_iov, remote_iov, xfer_op);
     if (ret < 0) {
         return std::variant<double, int>(ret);

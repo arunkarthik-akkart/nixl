@@ -44,20 +44,20 @@ class xferBenchWorker {
         static void signalHandler(int signal);
 
         // Memory management
-        virtual std::vector<xferBenchIOV> allocateMemory(void) = 0;
-        virtual void deallocateMemory(std::vector<xferBenchIOV> &iov_list) = 0;
+        virtual xferBenchIOV allocateMemory(void) = 0;
+        virtual void deallocateMemory(xferBenchIOV &iov) = 0;
 
         // Communication and synchronization
         virtual int exchangeMetadata() = 0;
-        virtual std::vector<xferBenchIOV> exchangeIOV(const std::vector<xferBenchIOV>
-                                                        &local_iov_list) = 0;
+        virtual xferBenchIOV exchangeIOV(const xferBenchIOV
+                                            &local_iov) = 0;
         virtual void poll(size_t block_size) = 0;
 	    virtual int synchronizeStart() = 0;
 
         // Data operations
         virtual std::variant<double, int> transfer(size_t block_size,
-                                                   const std::vector<xferBenchIOV> &local_iov_list,
-                                                   const std::vector<xferBenchIOV> &remote_iov_list) = 0;
+                                                   const xferBenchIOV &local_iov,
+                                                   const xferBenchIOV &remote_iov) = 0;
 };
 
 #endif // __WORKER_H

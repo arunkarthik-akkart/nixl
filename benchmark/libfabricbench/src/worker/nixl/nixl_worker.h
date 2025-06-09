@@ -39,20 +39,19 @@ class xferBenchNixlWorker: public xferBenchWorker {
         ~xferBenchNixlWorker();  // Custom destructor to clean up resources
 
         // Memory management
-        std::vector<xferBenchIOV> allocateMemory(void) override;
-        void deallocateMemory(std::vector<xferBenchIOV> &iov_list) override;
+        xferBenchIOV allocateMemory(void) override;
+        void deallocateMemory(xferBenchIOV &iov) override;
 
         // Communication and synchronization
         int exchangeMetadata() override;
-        std::vector<xferBenchIOV> exchangeIOV(const std::vector<xferBenchIOV>
-                                                    &local_iov_list) override;
+        xferBenchIOV exchangeIOV(const xferBenchIOV &local_iov) override;
         void poll(size_t block_size) override;
         int synchronizeStart();
 
         // Data operations
         std::variant<double, int> transfer(size_t block_size,
-                                           const std::vector<xferBenchIOV> &local_iov_list,
-                                           const std::vector<xferBenchIOV> &remote_iov_list) override;
+                                           const xferBenchIOV &local_iov,
+                                           const xferBenchIOV &remote_iov) override;
 
     private:
         std::optional<xferBenchIOV> initBasicDescDram(size_t buffer_size, int mem_dev_id);
