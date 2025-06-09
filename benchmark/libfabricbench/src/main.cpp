@@ -39,6 +39,8 @@ static int processBatchSizes(xferBenchWorker &worker,
         worker.exchangeIOV(local_trans);
         worker.poll(block_size);
 
+        // Print buffer content after transfer
+        std::cout << "Target buffer after transfer: " << (char*)iov.addr << std::endl;
     } else if (worker.isInitiator()) {
         xferBenchIOV remote_trans(worker.exchangeIOV(local_trans));
 
@@ -49,8 +51,7 @@ static int processBatchSizes(xferBenchWorker &worker,
             return 1;
         }
 
-        xferBenchUtils::printStats(false, block_size, 1,
-                                std::get<double>(result));
+        xferBenchUtils::printStats(false, block_size, std::get<double>(result));
     }
 
     return 0;

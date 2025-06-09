@@ -17,10 +17,6 @@
 
 #include "worker/nixl/nixl_worker.h"
 #include <cstring>
-#if HAVE_CUDA
-#include <cuda.h>
-#include <cuda_runtime.h>
-#endif
 #include <fcntl.h>
 #include <filesystem>
 #include <iomanip>
@@ -137,6 +133,30 @@ std::optional<xferBenchIOV> xferBenchNixlWorker::initBasicDescDram(size_t buffer
         memset(addr, XFERBENCH_TARGET_BUFFER_ELEMENT, buffer_size);
     }
 
+    if (isInitiator()) {
+        char hostname[256];
+        if (gethostname(hostname, sizeof(hostname)) != 0) {
+            strcpy(hostname, "unknown-host");
+        }
+            // Create a message with hostname, rank, and role
+        std::stringstream ss;
+        ss << "Message from host '" << hostname << "' (Initiator Node, Rank " 
+            << rt->getRank() << ")";
+        
+        std::string message = ss.str();
+        size_t message_len = message.length();
+    
+        strncpy((char*)addr, message.c_str(), message_len);
+        ((char*)addr)[message_len] = '\0';
+    
+        std::cout << "Initiator buffer content: " << (char*)addr << std::endl;
+        std::cout << "Message length: " << message_len << " bytes" << std::endl;
+    } else if (isTarget()) {
+        memset(addr, 0, buffer_size);  // Initialize with zeros
+        std::cout << "Target buffer initially empty." << std::endl;
+    }
+
+
     // TODO: Does device id need to be set for DRAM?
     return std::optional<xferBenchIOV>(std::in_place, (uintptr_t)addr, buffer_size, mem_dev_id);
 }
@@ -149,7 +169,7 @@ xferBenchIOV xferBenchNixlWorker::allocateMemory() {
     size_t buffer_size;
     nixl_opt_args_t opt_args;
 
-    buffer_size = xferBenchConfig::total_buffer_size;
+    buffer_size = 16*1024;
 
     opt_args.backends.push_back(backend_engine);
 
@@ -221,8 +241,7 @@ int xferBenchNixlWorker::exchangeMetadata() {
     return ret;
 }
 
-xferBenchIOV
-xferBenchNixlWorker::exchangeIOV(const xferBenchIOV &local_iov) {
+xferBenchIOV xferBenchNixlWorker::exchangeIOV(const xferBenchIOV &local_iov) {
     xferBenchIOV res(0,0,0);
     int desc_str_sz;
 

@@ -37,15 +37,12 @@
 DEFINE_string(backend, XFERBENCH_BACKEND_UCX, "Name of communication backend [UCX] \
               (only used with nixl worker)");
 DEFINE_string(op_type, XFERBENCH_OP_WRITE, "Op type: READ, WRITE");
-DEFINE_uint64(total_buffer_size, 8LL * 1024 * (1 << 20), "Total buffer \
-              size across device for each process (Default: 80 GiB)");
 DEFINE_bool(enable_pt, false, "Enable Progress Thread (only used with nixl worker)");
 
 DEFINE_string(etcd_endpoints, "http://localhost:2379", "ETCD server endpoints for communication");
 
 std::string xferBenchConfig::backend = "";
 std::string xferBenchConfig::op_type = "";
-size_t xferBenchConfig::total_buffer_size = 0;
 bool xferBenchConfig::enable_pt = false;
 std::string xferBenchConfig::etcd_endpoints = "";
 std::vector<std::string> devices = { };
@@ -54,9 +51,7 @@ int xferBenchConfig::loadFromFlags() {
     backend = FLAGS_backend;
     enable_pt = FLAGS_enable_pt;
     op_type = FLAGS_op_type;
-    total_buffer_size = FLAGS_total_buffer_size;
     etcd_endpoints = FLAGS_etcd_endpoints;
-
     return 0;
 }
 
@@ -70,8 +65,6 @@ void xferBenchConfig::printConfig() {
                 << enable_pt << std::endl;
     std::cout << std::left << std::setw(60) << "Op type (--op_type=[READ,WRITE])" << ": "
               << op_type << std::endl;
-    std::cout << std::left << std::setw(60) << "Total buffer size (--total_buffer_size=N)" << ": "
-              << total_buffer_size << std::endl;
     std::cout << std::string(80, '-') << std::endl;
     std::cout << std::endl;
 }
@@ -87,7 +80,6 @@ void xferBenchUtils::setRT(xferBenchRT *rt) {
 
 void xferBenchUtils::printStatsHeader() {
     std::cout << std::left << std::setw(20) << "Block Size (B)"
-                << std::setw(15) << "Batch Size"
                 << std::setw(15) << "Avg Lat. (us)"
                 << std::setw(15) << "B/W (MiB/Sec)"
                 << std::setw(15) << "B/W (GiB/Sec)"
@@ -96,12 +88,12 @@ void xferBenchUtils::printStatsHeader() {
     std::cout << std::string(80, '-') << std::endl;
 }
 
-void xferBenchUtils::printStats(bool is_target, size_t block_size, size_t batch_size, double total_duration) {
+void xferBenchUtils::printStats(bool is_target, size_t block_size, double total_duration) {
     size_t total_data_transferred = 0;
     double avg_latency = 0, throughput = 0, throughput_gib = 0, throughput_gb = 0;
 
-    total_data_transferred = ((block_size * batch_size) * 1); // In Bytes
-    avg_latency = (total_duration / (1 * batch_size)); // In microsec
+    total_data_transferred = block_size; // In Bytes
+    avg_latency = total_duration; // In microsec
 
     throughput = (((double) total_data_transferred / (1024 * 1024)) /
                    (total_duration / 1e6));   // In MiB/Sec
@@ -115,7 +107,6 @@ void xferBenchUtils::printStats(bool is_target, size_t block_size, size_t batch_
 
     // Tabulate print with fixed width for each string
     std::cout << std::left << std::setw(20) << block_size
-                << std::setw(15) << batch_size
                 << std::setw(15) << avg_latency
                 << std::setw(15) << throughput
                 << std::setw(15) << throughput_gib

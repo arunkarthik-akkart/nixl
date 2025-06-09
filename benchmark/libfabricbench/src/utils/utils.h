@@ -50,7 +50,6 @@ class xferBenchConfig {
         static std::string worker_type;
         static std::string backend;
         static std::string op_type;
-        static size_t total_buffer_size;
         static bool enable_pt;
         static std::string etcd_endpoints;
         static int loadFromFlags();
@@ -74,8 +73,7 @@ class xferBenchUtils {
         static void setRT(xferBenchRT *rt);
 
         static void printStatsHeader();
-        static void printStats(bool is_target, size_t block_size, size_t batch_size,
-			                   double total_duration);
+        static void printStats(bool is_target, size_t block_size, double total_duration);
 };
 
 #endif // __UTILS_H
