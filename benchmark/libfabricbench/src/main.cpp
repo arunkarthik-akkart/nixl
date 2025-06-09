@@ -28,54 +28,47 @@
 #include <memory>
 #include <csignal>
 
-static std::vector<std::vector<xferBenchIOV>> createTransferDescLists(xferBenchWorker &worker,
-                                                                      std::vector<std::vector<xferBenchIOV>> &iov_lists,
-                                                                      size_t block_size,
-                                                                      size_t batch_size) {
+static std::vector<xferBenchIOV> createTransferDescLists(xferBenchWorker &worker,
+                                                            std::vector<xferBenchIOV> &iov_list,
+                                                            size_t block_size,
+                                                            size_t batch_size) {
 
     size_t count = 1;
-    size_t stride = xferBenchConfig::total_buffer_size;
 
-    std::vector<std::vector<xferBenchIOV>> xfer_lists;
+    std::vector<xferBenchIOV> xfer_list;
 
-    for (const auto &iov_list: iov_lists) {
-        std::vector<xferBenchIOV> xfer_list;
+    for (const auto &iov : iov_list) {
+        for (size_t i = 0; i < count; i++) {
+            // size_t dev_offset = ((i * stride) % iov.len);
 
-        for (const auto &iov : iov_list) {
-            for (size_t i = 0; i < count; i++) {
-                size_t dev_offset = ((i * stride) % iov.len);
-
-                for (size_t j = 0; j < batch_size; j++) {
-                    size_t block_offset = ((j * block_size) % iov.len);
-                    xfer_list.push_back(xferBenchIOV((iov.addr + dev_offset) + block_offset,
-                                                      block_size,
-                                                      iov.devId));
-                }
+            for (size_t j = 0; j < batch_size; j++) {
+                // size_t block_offset = ((j * block_size) % iov.len);
+                xfer_list.push_back(xferBenchIOV(iov.addr,
+                                                    block_size,
+                                                    iov.devId));
             }
         }
-
-        xfer_lists.push_back(xfer_list);
     }
 
-    return xfer_lists;
+    return xfer_list;
 }
 
 static int processBatchSizes(xferBenchWorker &worker,
-                             std::vector<std::vector<xferBenchIOV>> &iov_lists,
+                             std::vector<xferBenchIOV> &iov_list,
                              size_t block_size) {
     size_t batch_size = 1;
 
     auto local_trans_lists = createTransferDescLists(worker,
-                                                        iov_lists,
-                                                        block_size,
-                                                        batch_size);
+                                                     iov_list,
+                                                     block_size,
+                                                     batch_size);
 
     if (worker.isTarget()) {
         worker.exchangeIOV(local_trans_lists);
         worker.poll(block_size);
 
     } else if (worker.isInitiator()) {
-        std::vector<std::vector<xferBenchIOV>> remote_trans_lists(worker.exchangeIOV(local_trans_lists));
+        std::vector<xferBenchIOV> remote_trans_lists(worker.exchangeIOV(local_trans_lists));
 
         auto result = worker.transfer(block_size,
                                         local_trans_lists,
@@ -104,6 +97,7 @@ int main(int argc, char *argv[]) {
     if (0 != ret) {
         return EXIT_FAILURE;
     }
+    std::cout << "Processed Command Line arguments" << std::endl;
 
     // Create the appropriate worker based on worker configuration
     std::unique_ptr<xferBenchWorker> worker_ptr = createWorker(&argc, &argv);
@@ -120,15 +114,19 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    std::vector<std::vector<xferBenchIOV>> iov_lists = worker_ptr->allocateMemory();
+    std::cout << "All processes are ready to start" << std::endl;
+
+    std::vector<xferBenchIOV> iov_list = worker_ptr->allocateMemory();
     auto mem_guard = make_scope_guard ([&] {
-        worker_ptr->deallocateMemory(iov_lists);
+        worker_ptr->deallocateMemory(iov_list);
     });
+    std::cout << "Memory Allocation complete. list length : " << iov_list.size() << std::endl;
 
     ret = worker_ptr->exchangeMetadata();
     if (0 != ret) {
         return EXIT_FAILURE;
     }
+    std::cout << "Memory Exchange metadata complete." << std::endl;
 
     if (worker_ptr->isInitiator() && worker_ptr->isMasterRank()) {
         xferBenchConfig::printConfig();
@@ -137,10 +135,12 @@ int main(int argc, char *argv[]) {
 
     size_t block_size = 16*1024;
 
-    ret = processBatchSizes(*worker_ptr, iov_lists, block_size);
+    std::cout << "Start processing the batch" << std::endl;
+    ret = processBatchSizes(*worker_ptr, iov_list, block_size);
     if (0 != ret) {
         return EXIT_FAILURE;
     }
+    std::cout << "End processing the batch" << std::endl;
 
     ret = worker_ptr->synchronize(); // Make sure environment is not used anymore
     if (0 != ret) {

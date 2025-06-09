@@ -32,9 +32,6 @@
 #include <utils/serdes/serdes.h>
 #include <omp.h>
 
-#define USE_VMM 0
-#define ROUND_UP(value, granularity) ((((value) + (granularity) - 1) / (granularity)) * (granularity))
-
 #define CHECK_NIXL_ERROR(result, message)                                         \
     do {                                                                          \
         if (0 != result) {                                                        \
@@ -150,8 +147,7 @@ void xferBenchNixlWorker::cleanupBasicDescDram(xferBenchIOV &iov) {
     free((void *)iov.addr);
 }
 
-std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory() {
-    std::vector<std::vector<xferBenchIOV>> iov_lists;
+std::vector<xferBenchIOV> xferBenchNixlWorker::allocateMemory() {
     size_t buffer_size;
     nixl_opt_args_t opt_args;
 
@@ -173,25 +169,24 @@ std::vector<std::vector<xferBenchIOV>> xferBenchNixlWorker::allocateMemory() {
     iovListToNixlRegDlist(iov_list, desc_list);
     CHECK_NIXL_ERROR(agent->registerMem(desc_list, &opt_args),
                     "registerMem failed");
-    iov_lists.push_back(iov_list);
+    std::cout << "allocate memory iov size :" << iov_list.size() << std::endl;
 
-    return iov_lists;
+    return iov_list;
 }
 
-void xferBenchNixlWorker::deallocateMemory(std::vector<std::vector<xferBenchIOV>> &iov_lists) {
+void xferBenchNixlWorker::deallocateMemory(std::vector<xferBenchIOV> &iov_list) {
     nixl_opt_args_t opt_args;
 
     opt_args.backends.push_back(backend_engine);
-    for (auto &iov_list: iov_lists) {
-        for (auto &iov: iov_list) {
-            cleanupBasicDescDram(iov);
-        }
-
-        nixl_reg_dlist_t desc_list(DRAM_SEG);
-        iovListToNixlRegDlist(iov_list, desc_list);
-        CHECK_NIXL_ERROR(agent->deregisterMem(desc_list, &opt_args),
-                         "deregisterMem failed");
+    for (auto &iov: iov_list) {
+        cleanupBasicDescDram(iov);
     }
+
+    nixl_reg_dlist_t desc_list(DRAM_SEG);
+    iovListToNixlRegDlist(iov_list, desc_list);
+    CHECK_NIXL_ERROR(agent->deregisterMem(desc_list, &opt_args),
+                        "deregisterMem failed");
+    std::cout << "deallocate memory iov size :" << iov_list.size() << std::endl; 
 }
 
 int xferBenchNixlWorker::exchangeMetadata() {
@@ -232,62 +227,61 @@ int xferBenchNixlWorker::exchangeMetadata() {
     return ret;
 }
 
-std::vector<std::vector<xferBenchIOV>>
-xferBenchNixlWorker::exchangeIOV(const std::vector<std::vector<xferBenchIOV>> &local_iovs) {
-    std::vector<std::vector<xferBenchIOV>> res;
+std::vector<xferBenchIOV>
+xferBenchNixlWorker::exchangeIOV(const std::vector<xferBenchIOV> &local_iov) {
+    std::vector<xferBenchIOV> res;
     int desc_str_sz;
 
-    for (const auto &local_iov: local_iovs) {
-        nixlSerDes ser_des;
-        nixl_xfer_dlist_t local_desc(DRAM_SEG);
+    nixlSerDes ser_des;
+    nixl_xfer_dlist_t local_desc(DRAM_SEG);
 
-        iovListToNixlXferDlist(local_iov, local_desc);
+    iovListToNixlXferDlist(local_iov, local_desc);
 
-        if (isTarget()) {
-            const char *buffer;
-            int destrank;
+    if (isTarget()) {
+        const char *buffer;
+        int destrank;
 
-            local_desc.serialize(&ser_des);
-            std::string desc_str = ser_des.exportStr();
-            buffer = desc_str.data();
-            desc_str_sz = desc_str.size();
+        local_desc.serialize(&ser_des);
+        std::string desc_str = ser_des.exportStr();
+        buffer = desc_str.data();
+        desc_str_sz = desc_str.size();
 
 
-            destrank = 0;
+        destrank = 0;
 
-            rt->sendInt(&desc_str_sz, destrank);
-            rt->sendChar((char *)buffer, desc_str_sz, destrank);
-        } else if (isInitiator()) {
-            char *buffer;
-            int srcrank;
+        rt->sendInt(&desc_str_sz, destrank);
+        rt->sendChar((char *)buffer, desc_str_sz, destrank);
+    } else if (isInitiator()) {
+        char *buffer;
+        int srcrank;
 
-            srcrank = 1;
+        srcrank = 1;
 
-            rt->recvInt(&desc_str_sz, srcrank);
-            buffer = (char *)calloc(desc_str_sz, sizeof(*buffer));
-            rt->recvChar((char *)buffer, desc_str_sz, srcrank);
+        rt->recvInt(&desc_str_sz, srcrank);
+        buffer = (char *)calloc(desc_str_sz, sizeof(*buffer));
+        rt->recvChar((char *)buffer, desc_str_sz, srcrank);
 
-            std::string desc_str(buffer, desc_str_sz);
-            ser_des.importStr(desc_str);
+        std::string desc_str(buffer, desc_str_sz);
+        ser_des.importStr(desc_str);
 
-            nixl_xfer_dlist_t remote_desc(&ser_des);
-            res.emplace_back(nixlXferDlistToIOVList(remote_desc));
-        }
+        nixl_xfer_dlist_t remote_desc(&ser_des);
+        res = nixlXferDlistToIOVList(remote_desc);
     }
+
+    std::cout << "exchange iov list iov size :" << local_iov.size() << std::endl;
+
+    std::cout << "result iov list iov size :" << res.size() << std::endl;
     // Ensure all processes have completed the exchange with a barrier/sync
     synchronize();
     return res;
 }
 
 static int execTransfer(nixlAgent *agent,
-                        const std::vector<std::vector<xferBenchIOV>> &local_iovs,
-                        const std::vector<std::vector<xferBenchIOV>> &remote_iovs,
+                        const std::vector<xferBenchIOV> &local_iov,
+                        const std::vector<xferBenchIOV> &remote_iov,
                         const nixl_xfer_op_t op)
 {
     int ret = 0;
-
-    const auto &local_iov = local_iovs[0];
-    const auto &remote_iov = remote_iovs[0];
 
     // TODO: fetch local_desc and remote_desc directly from config
     nixl_xfer_dlist_t local_desc(DRAM_SEG);
@@ -336,15 +330,17 @@ static int execTransfer(nixlAgent *agent,
 }
 
 std::variant<double, int> xferBenchNixlWorker::transfer(size_t block_size,
-                                               const std::vector<std::vector<xferBenchIOV>> &local_iovs,
-                                               const std::vector<std::vector<xferBenchIOV>> &remote_iovs) {
+                                               const std::vector<xferBenchIOV> &local_iov,
+                                               const std::vector<xferBenchIOV> &remote_iov) {
     struct timeval t_start, t_end;
     double total_duration = 0.0;
     int ret = 0;
     nixl_xfer_op_t xfer_op = XFERBENCH_OP_READ == xferBenchConfig::op_type ? NIXL_READ : NIXL_WRITE;
     // int completion_flag = 1;
 
-    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op);
+    std::cout << "transfer iov list iov size :" << local_iov.size() << std::endl;
+    std::cout << "remote iov list iov size :" << remote_iov.size() << std::endl;
+    ret = execTransfer(agent, local_iov, remote_iov, xfer_op);
     if (ret < 0) {
         return std::variant<double, int>(ret);
     }
@@ -354,7 +350,7 @@ std::variant<double, int> xferBenchNixlWorker::transfer(size_t block_size,
 
     gettimeofday(&t_start, nullptr);
 
-    ret = execTransfer(agent, local_iovs, remote_iovs, xfer_op);
+    ret = execTransfer(agent, local_iov, remote_iov, xfer_op);
 
     gettimeofday(&t_end, nullptr);
     total_duration += (((t_end.tv_sec - t_start.tv_sec) * 1e6) +
@@ -381,7 +377,6 @@ void xferBenchNixlWorker::poll(size_t block_size) {
 }
 
 int xferBenchNixlWorker::synchronizeStart() {
-    
     std::cout << "Waiting for all processes to start... (expecting "
                 << rt->getSize() << " total" << std::endl;
     if (rt) {
